@@ -14,12 +14,16 @@ www.r-site.net
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
 #include <menu.h>
-// #include <menuIO/liquidCrystalOut.h>
-#include <menuIO/serialOut.h>
-#include <menuIO/TFT_eSPIOut.h>
-// #include <menuIO/utftOut.h>
+#include <ClickEncoder.h>
+// #include <RotaryEncoder.h>
+#include <SAMDUETimerInterrupt.h>
+// #include <streamFlow.h>
+// #include <TimerOne.h>
+#include <menuIO/clickEncoderIn.h>
+#include <menuIO/serialIO.h>
 #include <menuIO/chainStream.h>
-// #include <menuIO/urtouchIn.h>
+#include <menuIO/TFT_eSPIOut.h>
+#include <menuIO/serialOut.h>
 #include <menuIO/serialIn.h>
 #include <menuIO/keyIn.h>
 
@@ -35,6 +39,13 @@ const float reference_voltage = 3.11;
 float calibration_voltage=0.39;
 
 unsigned long last_measurement_time = 0;
+
+// Encoder /////////////////////////////////////
+#define encA 25
+#define encB 24
+//this encoder has a button here
+#define encBtn 22
+#define encSteps 4
 
 #define Black RGB565(0,0,0)
 #define Red	RGB565(255,0,0)
@@ -184,7 +195,7 @@ result showEvent(eventMask e,navNode& nav,prompt& item);
 result saveConfig();
 result printConfig();
 
-MENU(settingsMenu,"Settings",doNothing,anyEvent,noStyle
+MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
 //   ,OP("Volts",showEvent,anyEvent)
 //   ,OP("Amps",showEvent,anyEvent)
   ,FIELD(config_obj.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
@@ -204,6 +215,11 @@ MENU(mainMenu, "Blink menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
   ,OP("Print Config",printConfig,Menu::enterEvent)
   ,EXIT("<Back")
 );
+
+// Declare the clickencoder
+// Disable doubleclicks in setup makes the response faster.  See: https://github.com/soligen2010/encoder/issues/6
+ClickEncoder clickEncoder = ClickEncoder(encA, encB, encBtn, encSteps);
+ClickEncoderStream encStream(clickEncoder, 1);
 
 // keyMap joystickBtn_map[]={
 //  {-BTN_ENTER, defaultNavCodes[enterCmd].ch} ,
@@ -237,7 +253,9 @@ extern navRoot nav;
 // URTouch utouch(TFT_SCLK, TOUCH_CS, TFT_MOSI, TFT_MISO, 2);
 TFT_eSPI_touchIn touch(tft, nav, eSpiOut);
 serialIn inSerial(Serial);
-MENU_INPUTS(in,&inSerial,&touch/*&joystickBtns*/);
+MENU_INPUTS(in,&inSerial,&touch,&encStream/*&joystickBtns*/);
+
+void timerIsr() {clickEncoder.service();}
 
 // MENU_OUTPUTS(out,MAX_DEPTH
 //   ,SERIAL_OUT(Serial)
@@ -423,8 +441,24 @@ result printConfig() {
     return proceed;
 }
 
+uint16_t Timer1_Index = 0;
+
+uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const char* TimerName)
+{
+  DueTimerInterrupt dueTimerInterrupt = DueTimer.getAvailable();
+  
+  dueTimerInterrupt.attachInterruptInterval(microseconds, callback);
+
+  uint16_t timerNumber = dueTimerInterrupt.getTimerNumber();
+  
+  Serial.print(TimerName); Serial.print(F(" attached to Timer(")); Serial.print(timerNumber); Serial.println(F(")"));
+
+  return timerNumber;
+}
+
 void setup() {
     pinMode(LEDPIN, OUTPUT);
+    pinMode(encBtn,INPUT_PULLUP);
     Serial.begin(9600);
     while(!Serial);
 
@@ -474,6 +508,9 @@ void setup() {
     nav.showTitle = false;
     nav.idleTask = measure;
     psu_init();
+    Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
+    // Timer1.initialize(1000);
+    // Timer1.attachInterrupt(timerIsr);
     nav.idleOn(measure);//this menu will start on idle state, press select to enter menu
 }
 
