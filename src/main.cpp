@@ -29,6 +29,9 @@ www.r-site.net
 
 #include "TFT_eSPI_touchIn.h"
 #include "EEPROM_vars.h"
+#include "config.h"
+#include "quantity.h"
+#include "measurement.h"
 
 #define LEDPIN LED_BUILTIN
 #define MAX_DEPTH 2
@@ -72,43 +75,63 @@ const colorDef<uint16_t> colors[6] MEMMODE={
   {{(uint16_t)White,(uint16_t)Yellow},{(uint16_t)Blue,  (uint16_t)Red,   (uint16_t)Red}},//titleColor
 };
 
-struct Config {
-    uint8_t conf_in_eeprom = 0;
-    unsigned int n_calibrations = 40;
-    float max_voltage = 15.00F;
-    float min_voltage = 11.50F;
-    float max_current = 10.00F;
-    float min_current = 0.10F;
-    unsigned int measurement_delay = 1000;
-    float sensitivity = 0.185F;
-    unsigned int R1 = 180000;
-    unsigned int R2 = 47000;
-    unsigned short resolution = 4096;
-    float reference_voltage = 3.30F;
-    float calibration_voltage = 0.39F;
-
-    void print() {
-        Serial.println("conf_in_eeprom " + String(conf_in_eeprom));
-        Serial.println("n_calibrations " + String(n_calibrations));
-        Serial.println("max_voltage " + String(max_voltage));
-        Serial.println("min_voltage " + String(min_voltage));
-        Serial.println("max_current " + String(max_current));
-        Serial.println("min_current " + String(min_current));
-        Serial.println("measurement_delay " + String(measurement_delay));
-        Serial.println("sensitivity " + String(sensitivity));
-        Serial.println("R1 " + String(R1));
-        Serial.println("R2 " + String(R2));
-        Serial.println("resolution " + String(resolution));
-        Serial.println("reference_voltage " + String(reference_voltage));
-        Serial.println("calibration_voltage " + String(calibration_voltage));
-        Serial.println("\tDone...");
-    }
-};
-
 const char *filename = "/config.txt";  // <- SD library uses 8.3 filenames
 Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
-TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
+TFT_eSPI tft{};       // Invoke custom library
+
+enum Eval{ Low, Fine, High};
+String eval_name[] = {"Low", "Fine", "High"};
+
+class Measurement : public MeasurementTemplate {
+private:
+    Quantity* voltage;
+    Quantity* current;
+    Quantity* power;
+    //, consumption;
+
+    float measure_voltage(uint32_t pin, const Config& conf) const override {
+        unsigned int raw_voltage = analogRead(pin);
+        float voltage = conf.reference_voltage / conf.resolution * raw_voltage;
+        voltage *= (conf.R1 + conf.R2) / conf.R2;
+        return voltage;
+    }
+
+    float measure_current(uint32_t pin, const Config& conf) const override {
+        unsigned int raw_current_voltage = analogRead(pin);
+        float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage;
+        float current = (current_voltage - conf.calibration_voltage) / conf.sensitivity;
+        return current > 0 ? current : 0;
+    }
+
+    float measure_power(const float& voltage, const float& current) const override {
+        return voltage * current;
+    }
+
+public:
+    Measurement() {
+        // TODO: Allocate on stack if possible
+        voltage = new Quantity(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V");
+        current = new Quantity(measure_current(CURRENT_INPUT_PIN, conf), "A");
+        power = new Quantity(measure_power(voltage->get_value(), current->get_value()), "W");
+    };
+
+    ~Measurement() {
+        delete voltage;
+        delete current;
+        delete power;
+    };
+
+    template<typename O>
+    void print(O& out) {
+        out.setCursor(0, 0);
+        out.print(String(voltage->get_value() + " " + voltage->get_unit()));
+        out.setCursor(0, 1);
+        out.print(String(current->get_value() + " " + current->get_unit()));
+        out.setCursor(0, 2);
+        out.print(String(power->get_value() + " " + power->get_unit()));
+    }
+};
 
 // Loads the configuration from a file and sets default values
 bool load_config_from_SD(const char *filename, Config &conf) {
@@ -209,6 +232,24 @@ void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
     eeprom.put(0, conf);
 }
 
+// void log_measurement_to_SD(const Measurement& measurement, const String& filename) {
+//     String log = "";
+//     if (SD.exists(filename) == false)
+//     {
+//         log = "Voltage [V],Voltage State [LOW|FINE|HIGH],Current [A],Current State [LOW|FINE|HIGH]\n";
+//     }
+    
+    
+//     File file = SD.open(filename, FILE_WRITE);
+//     if (!file) {
+//         Serial.println(F("Failed to log the measurement"));
+//         return;
+//     }
+//     log += String(measurement.get_voltage().get_value()) + ",";
+//     file.println();
+//     file.close();
+// }
+
 unsigned int timeOn=1000;
 unsigned int timeOff=1000;
 
@@ -296,114 +337,6 @@ float get_calibrated_ref_voltage(unsigned int n_calibrations) {
     return conf.reference_voltage / conf.resolution * avg_value;
 }
 
-struct Quantity
-{
-    virtual float measure();
-    virtual float get_value() const;
-    virtual ~Quantity() = 0;
-};
-
-Quantity::~Quantity() {}
-
-class Voltage : public Quantity
-{
-private:
-    float value;
-public:
-    Voltage();
-    ~Voltage() = default;
-    float measure() override;
-    float get_value() const override;
-};
-
-Voltage::Voltage(/* args */)
-{
-    value = this->measure();
-}
-
-float Voltage::measure() {
-    float raw_voltage = analogRead(VOLTAGE_INPUT_PIN);
-    float voltage = conf.reference_voltage / conf.resolution * raw_voltage;
-    return voltage * (conf.R1 + conf.R2) / conf.R2;
-}
-
-float Voltage::get_value() const {
-    return value;
-}
-
-class Current : public Quantity
-{
-private:
-    float value;
-public:
-    Current();
-    ~Current() = default;
-    float measure() override;
-    float get_value() const override;
-};
-
-Current::Current()
-{
-    value = this->measure();
-}
-
-float Current::measure() {
-    float raw_current_voltage = analogRead(CURRENT_INPUT_PIN);
-    float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage;
-    float current = (current_voltage - conf.calibration_voltage) / conf.sensitivity;
-    if (current > 0)
-    {
-        return current;
-    }
-    return 0;
-}
-
-float Current::get_value() const {
-    return value;
-}
-
-class Power : public Quantity
-{
-private:
-    float value = 0.0f;
-public:
-    Power() = default;
-    ~Power();
-    float measure() override;
-    float get_value() const override;
-};
-
-class Measurement
-{
-private:
-    Voltage* voltage;
-    Current* current;
-public:
-    Measurement();
-    ~Measurement();
-    Voltage* get_voltage() const;
-    Current* get_current() const;
-};
-
-Measurement::Measurement()
-{
-    voltage = new Voltage();
-    current = new Current();
-}
-
-Measurement::~Measurement()
-{
-    delete voltage;
-    delete current;
-}
-
-Voltage* Measurement::get_voltage() const {
-    return voltage;
-}
-
-Current* Measurement::get_current() const {
-    return current;
-}
 
 result measure(menuOut& o,idleEvent e) {
     nav.idleChanged = true;
@@ -411,12 +344,13 @@ result measure(menuOut& o,idleEvent e) {
     if (millis() - last_measurement_time > conf.measurement_delay)
     {
         last_measurement_time = millis();
-        Measurement measurement{};
+        Measurement measurement;
+        measurement.print(o);
         // o.clear();
-        o.setCursor(0, 0);
-        o.print(String(measurement.get_voltage()->get_value()) + " V");
-        o.setCursor(0, 1);
-        o.print(String(measurement.get_current()->get_value()) + " A");
+        // o.setCursor(0, 0);
+        // o.print(String(measurement.get_voltage().get_value()) + " V");
+        // o.setCursor(0, 1);
+        // o.print(String(measurement.get_current().get_value()) + " A");
     }
     return proceed;
 }
