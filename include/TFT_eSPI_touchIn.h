@@ -46,7 +46,7 @@ UTouch library from:
                     evTime=millis();
                     // touch.getTouch(&startX,&startY);
                     z = touch.getTouchRawZ();
-                    Serial.println("x: " + String(startX) + ", y: " + String(startY) + ", z: " + String(z));
+                    // Serial.println("x: " + String(startX) + ", y: " + String(startY) + ", z: " + String(z));
                     // startX=touch.getX()-p.x*out.resX;
                     // Serial.println("x: " + String(touch.getX()));
                     if (startX>out.maxX()*out.resX) return -1;
@@ -56,12 +56,12 @@ UTouch library from:
                     // Serial.println("x: " + String(startX) + ", y: " + String(y));
                     //within menu box
                     if (touching) {//might be dragging
-                        Serial.println("touching");
+                        // Serial.println("touching");
                         int d=scrlY-y;
                         int ad=abs(d);
                         if (ad>(out.resY>>1)&&(ad<<1)>out.resY) {
                             dragging=true;//we consider it a drag
-                            Serial.println("dragging");
+                            // Serial.println("dragging");
                             scrlY-=(d>0?1:-1)*(out.resY/2);
                             //prompt* nf=root.navFocus;
                             /*if (nf->isMenu()&&!nf->isVariant()) {

@@ -28,6 +28,7 @@ www.r-site.net
 #include <menuIO/keyIn.h>
 
 #include "TFT_eSPI_touchIn.h"
+#include "EEPROM_vars.h"
 
 #define LEDPIN LED_BUILTIN
 #define MAX_DEPTH 2
@@ -35,8 +36,7 @@ www.r-site.net
 #define CURRENT_INPUT_PIN A6
 #define VOLTAGE_INPUT_PIN A5
 
-const float reference_voltage = 3.11;
-float calibration_voltage=0.39;
+#define SOFT_DEBOUNCE_MS 100
 
 unsigned long last_measurement_time = 0;
 
@@ -73,119 +73,141 @@ const colorDef<uint16_t> colors[6] MEMMODE={
 };
 
 struct Config {
-    // char hostname[64];
-    unsigned int n_calibrations;
-    float max_voltage;
-    float min_voltage;
-    float max_current;
-    float min_current;
-    unsigned int measurement_delay;
-    float sensitivity;
-    float R1;
-    float R2;
-    int resolution;
+    uint8_t conf_in_eeprom = 0;
+    unsigned int n_calibrations = 40;
+    float max_voltage = 15.00F;
+    float min_voltage = 11.50F;
+    float max_current = 10.00F;
+    float min_current = 0.10F;
+    unsigned int measurement_delay = 1000;
+    float sensitivity = 0.185F;
+    unsigned int R1 = 180000;
+    unsigned int R2 = 47000;
+    unsigned short resolution = 4096;
+    float reference_voltage = 3.30F;
+    float calibration_voltage = 0.39F;
+
+    void print() {
+        Serial.println("conf_in_eeprom " + String(conf_in_eeprom));
+        Serial.println("n_calibrations " + String(n_calibrations));
+        Serial.println("max_voltage " + String(max_voltage));
+        Serial.println("min_voltage " + String(min_voltage));
+        Serial.println("max_current " + String(max_current));
+        Serial.println("min_current " + String(min_current));
+        Serial.println("measurement_delay " + String(measurement_delay));
+        Serial.println("sensitivity " + String(sensitivity));
+        Serial.println("R1 " + String(R1));
+        Serial.println("R2 " + String(R2));
+        Serial.println("resolution " + String(resolution));
+        Serial.println("reference_voltage " + String(reference_voltage));
+        Serial.println("calibration_voltage " + String(calibration_voltage));
+        Serial.println("\tDone...");
+    }
 };
 
 const char *filename = "/config.txt";  // <- SD library uses 8.3 filenames
-Config config_obj;                         // <- global configuration object
-
+Config conf{};                         // <- global configuration object
+EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
 TFT_eSPI tft = TFT_eSPI();       // Invoke custom library
-// UTFT tft();
 
 // Loads the configuration from a file and sets default values
-void loadConfiguration(const char *filename, Config &config_obj) {
+bool load_config_from_SD(const char *filename, Config &conf) {
     // Open file for reading
     File file = SD.open(filename);
 
     // Allocate a temporary JsonDocument
-    // Don't forget to change the capacity to match your requirements.
-    // Use arduinojson.org/v6/assistant to compute the capacity.
+    // Use arduinojson.org/v6/assistant to compute your file's capacity.
     StaticJsonDocument<512> doc;
 
     // Deserialize the JSON document
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
-        Serial.println(F("Failed to read file, using default configuration"));
+        Serial.println(F("Failed to read file"));
+        Serial.println(error.c_str());
+        file.close();
+        return false;
     }
 
     // Copy values from the JsonDocument to the Config
-    config_obj.n_calibrations = doc["n_calibrations"] | 100;
-    config_obj.max_voltage = doc["max_voltage"] | 15;
-    config_obj.min_voltage = doc["min_voltage"] | 13;
-    config_obj.max_current = doc["max_current"] | 5;
-    config_obj.min_current = doc["min_current"] | 4;
-    config_obj.measurement_delay = doc["measurement_delay"] | 1000;
-    config_obj.sensitivity = doc["sensitivity"] | 0.185;
-    config_obj.R1 = doc["R1"] | 9950;
-    config_obj.R2 = doc["R2"] | 2550;
-    config_obj.resolution = doc["resolution"] | 4096;
-    // strlcpy(config_obj.hostname,                  // <- destination
-    //         doc["hostname"] | "example.com",  // <- source
-    //         sizeof(config_obj.hostname));         // <- destination's capacity
+    conf.conf_in_eeprom = doc["conf_in_eeprom"] | conf.conf_in_eeprom;
+    conf.n_calibrations = doc["n_calibrations"] | conf.n_calibrations;
+    conf.max_voltage = doc["max_voltage"] | conf.max_voltage;
+    conf.min_voltage = doc["min_voltage"] | conf.min_voltage;
+    conf.max_current = doc["max_current"] | conf.max_current;
+    conf.min_current = doc["min_current"] | conf.min_current;
+    conf.measurement_delay = doc["measurement_delay"] | conf.measurement_delay;
+    conf.sensitivity = doc["sensitivity"] | conf.sensitivity;
+    conf.R1 = doc["R1"] | conf.R1;
+    conf.R2 = doc["R2"] | conf.R2;
+    conf.resolution = doc["resolution"] | conf.resolution;
+    conf.reference_voltage = doc["reference_voltage"] | conf.reference_voltage;
+    conf.calibration_voltage = doc["calibration_voltage"] | conf.calibration_voltage;
 
-    // Close the file (Curiously, File's destructor doesn't close the file)
     file.close();
+    return true;
 }
 
 // Saves the configuration to a file
-void saveConfiguration(const char *filename, const Config &config_obj) {
-  // Delete existing file, otherwise the configuration is appended to the file
-  SD.remove(filename);
+void save_config_to_SD(const char *filename, const Config &conf) {
+    // Delete existing file, otherwise the configuration is appended to the file
+    SD.remove(filename);
 
-  // Open file for writing
-  File file = SD.open(filename, FILE_WRITE);
-  if (!file) {
-    Serial.println(F("Failed to create file"));
-    return;
-  }
+    // Open file for writing
+    File file = SD.open(filename, FILE_WRITE);
+    if (!file) {
+        Serial.println(F("Failed to create file"));
+        return;
+    }
 
-  // Allocate a temporary JsonDocument
-  // Don't forget to change the capacity to match your requirements.
-  // Use arduinojson.org/assistant to compute the capacity.
-  StaticJsonDocument<256> doc;
+    // Allocate a temporary JsonDocument
+    // Use arduinojson.org/assistant to compute your file capacity the capacity.
+    StaticJsonDocument<256> doc;
 
     // Set the values in the document
-    doc["n_calibrations"] = config_obj.n_calibrations;
-    doc["max_voltage"] = config_obj.max_voltage;
-    doc["min_voltage"] = config_obj.min_voltage;
-    doc["max_current"] = config_obj.max_current;
-    doc["min_current"] = config_obj.min_current;
-    doc["measurement_delay"] = config_obj.measurement_delay;
-    doc["sensitivity"] = config_obj.sensitivity;
-    doc["R1"] = config_obj.R1;
-    doc["R2"] = config_obj.R2;
-    doc["resolution"] = config_obj.resolution;
+    doc["n_calibrations"] = conf.n_calibrations;
+    doc["max_voltage"] = conf.max_voltage;
+    doc["min_voltage"] = conf.min_voltage;
+    doc["max_current"] = conf.max_current;
+    doc["min_current"] = conf.min_current;
+    doc["measurement_delay"] = conf.measurement_delay;
+    doc["sensitivity"] = conf.sensitivity;
+    doc["R1"] = conf.R1;
+    doc["R2"] = conf.R2;
+    doc["resolution"] = conf.resolution;
 
-  // Serialize JSON to file
-  if (serializeJson(doc, file) == 0) {
+  // Serialize JSON to file with spaces and line-breaks
+  if (serializeJsonPretty(doc, file) == 0) {
     Serial.println(F("Failed to write to file"));
   }
 
-  // Close the file
   file.close();
 }
 
 // Prints the content of a file to the Serial
 void printFile(const char *filename) {
-  // Open file for reading
-  File file = SD.open(filename);
-  if (!file) {
-    Serial.println(F("Failed to read file"));
-    return;
-  }
+    // Open file for reading
+    File file = SD.open(filename);
+    if (!file) {
+        Serial.println(F("Failed to read file"));
+        return;
+    }
 
-  // Extract each characters by one by one
-  while (file.available()) {
-    Serial.print((char)file.read());
-  }
-  Serial.println();
+    // Extract each characters by one by one
+    while (file.available()) {
+        Serial.print((char)file.read());
+    }
+    Serial.println();
 
-  // Close the file
-  file.close();
+    file.close();
 }
 
-// LCD /////////////////////////////////////////
-// LiquidCrystal lcd(8, 7, 5, 6, 3, 2);  
+void load_config_from_EEPROM(EEPROM& eeprom, Config& conf) {
+    eeprom.get(0, conf);
+}
+
+void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
+    eeprom.put(0, conf);
+}
 
 unsigned int timeOn=1000;
 unsigned int timeOff=1000;
@@ -194,25 +216,25 @@ result doMeasure(eventMask e, prompt &item);
 result showEvent(eventMask e,navNode& nav,prompt& item);
 result saveConfig();
 result printConfig();
+result dumpEEPROM();
 
 MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
-//   ,OP("Volts",showEvent,anyEvent)
-//   ,OP("Amps",showEvent,anyEvent)
-  ,FIELD(config_obj.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
-  ,FIELD(config_obj.min_voltage,"Min"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
-  ,FIELD(config_obj.max_current,"Max"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
-  ,FIELD(config_obj.min_current,"Min"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
-  ,FIELD(config_obj.measurement_delay,"Delay"," ms",100,60000,1000,100,doNothing,noEvent,noStyle)
+  ,FIELD(conf.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
+  ,FIELD(conf.min_voltage,"Min"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
+  ,FIELD(conf.max_current,"Max"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
+  ,FIELD(conf.min_current,"Min"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
+  ,FIELD(conf.measurement_delay,"Delay"," ms",100,60000,1000,100,doNothing,noEvent,noStyle)
   ,EXIT("<Back")
 );
 
-MENU(mainMenu, "Blink menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
-  ,FIELD(timeOn,"On","ms",0,1000,10,1, Menu::doNothing, Menu::noEvent, Menu::noStyle)
-  ,FIELD(timeOff,"Off","ms",0,10000,10,1,Menu::doNothing, Menu::noEvent, Menu::noStyle)
+MENU(mainMenu, "Main Menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
+//   ,FIELD(timeOn,"On","ms",0,1000,10,1, Menu::doNothing, Menu::noEvent, Menu::noStyle)
+//   ,FIELD(timeOff,"Off","ms",0,10000,10,1,Menu::doNothing, Menu::noEvent, Menu::noStyle)
   ,OP("Measure",doMeasure,enterEvent)
   ,SUBMENU(settingsMenu)
   ,OP("Save Config",saveConfig,Menu::enterEvent)
   ,OP("Print Config",printConfig,Menu::enterEvent)
+  ,OP("Dump EEPROM",dumpEEPROM,Menu::enterEvent)
   ,EXIT("<Back")
 );
 
@@ -220,14 +242,6 @@ MENU(mainMenu, "Blink menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
 // Disable doubleclicks in setup makes the response faster.  See: https://github.com/soligen2010/encoder/issues/6
 ClickEncoder clickEncoder = ClickEncoder(encA, encB, encBtn, encSteps);
 ClickEncoderStream encStream(clickEncoder, 1);
-
-// keyMap joystickBtn_map[]={
-//  {-BTN_ENTER, defaultNavCodes[enterCmd].ch} ,
-//  {-BTN_UP, defaultNavCodes[upCmd].ch} ,
-//  {-BTN_DOWN, defaultNavCodes[downCmd].ch}  ,
-//  {-BTN_BACK, defaultNavCodes[escCmd].ch},
-// };
-// keyIn<4> joystickBtns(joystickBtn_map);
 
 #define textScale 6
 #define defaultTextW 6
@@ -265,25 +279,21 @@ void timerIsr() {clickEncoder.service();}
 
 NAVROOT(nav,mainMenu,MAX_DEPTH,in,out);
 
-void psu_init() {
-    tft.println("Initializing....");
-    Serial.println("Initializing....");
-    int buffer[config_obj.n_calibrations];
+float get_calibrated_ref_voltage(unsigned int n_calibrations) {
+    tft.println("Calibrating...");
+    Serial.println("Calibrating...");
+
     int value = 0;
 
-    for (size_t i = 0; i < config_obj.n_calibrations; i++)
+    for (size_t i = 0; i < n_calibrations; i++)
     {
-        buffer[i] = analogRead(CURRENT_INPUT_PIN);
-        value += buffer[i];
-        delay(100);
+        value += analogRead(CURRENT_INPUT_PIN);
+        delay(40);
     }
     
-    float avg_value = value / (config_obj.n_calibrations - 1);
-
-    calibration_voltage = reference_voltage / config_obj.resolution * avg_value;
-    // tft.clear();
+    float avg_value = value / (n_calibrations - 1);
     Serial.println("Done!");
-    delay(1000);
+    return conf.reference_voltage / conf.resolution * avg_value;
 }
 
 struct Quantity
@@ -313,8 +323,8 @@ Voltage::Voltage(/* args */)
 
 float Voltage::measure() {
     float raw_voltage = analogRead(VOLTAGE_INPUT_PIN);
-    float voltage = reference_voltage / config_obj.resolution * raw_voltage;
-    return voltage * (config_obj.R1 + config_obj.R2) / config_obj.R2;
+    float voltage = conf.reference_voltage / conf.resolution * raw_voltage;
+    return voltage * (conf.R1 + conf.R2) / conf.R2;
 }
 
 float Voltage::get_value() const {
@@ -339,8 +349,8 @@ Current::Current()
 
 float Current::measure() {
     float raw_current_voltage = analogRead(CURRENT_INPUT_PIN);
-    float current_voltage = reference_voltage / config_obj.resolution * raw_current_voltage;
-    float current = (current_voltage - calibration_voltage) / config_obj.sensitivity;
+    float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage;
+    float current = (current_voltage - conf.calibration_voltage) / conf.sensitivity;
     if (current > 0)
     {
         return current;
@@ -362,19 +372,6 @@ public:
     float measure() override;
     float get_value() const override;
 };
-
-// float Power::measure() {
-//     if (value > 0)
-//     {
-//         return current;
-//     }
-//     return 0;
-// }
-
-// float Power::get_value() const {
-//     return value;
-// }
-
 
 class Measurement
 {
@@ -411,7 +408,7 @@ Current* Measurement::get_current() const {
 result measure(menuOut& o,idleEvent e) {
     nav.idleChanged = true;
 
-    if (millis() - last_measurement_time > config_obj.measurement_delay)
+    if (millis() - last_measurement_time > conf.measurement_delay)
     {
         last_measurement_time = millis();
         Measurement measurement{};
@@ -430,7 +427,8 @@ result doMeasure(eventMask e, prompt &item) {
 }
 
 result saveConfig() {
-    saveConfiguration(filename, config_obj);
+    save_config_to_SD(filename, conf);
+    update_config_to_EEPROM(eeprom, conf);
     return proceed;
 }
 
@@ -438,76 +436,89 @@ result printConfig() {
     Serial.println();
     Serial.println();
     printFile(filename);
+    conf.print();
+    return proceed;
+}
+
+result dumpEEPROM() {
+    eeprom.dumpEEPROM(0, 256);
     return proceed;
 }
 
 uint16_t Timer1_Index = 0;
 
-uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const char* TimerName)
-{
-  DueTimerInterrupt dueTimerInterrupt = DueTimer.getAvailable();
-  
-  dueTimerInterrupt.attachInterruptInterval(microseconds, callback);
+uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const char* TimerName) {
+    DueTimerInterrupt dueTimerInterrupt = DueTimer.getAvailable();
 
-  uint16_t timerNumber = dueTimerInterrupt.getTimerNumber();
-  
-  Serial.print(TimerName); Serial.print(F(" attached to Timer(")); Serial.print(timerNumber); Serial.println(F(")"));
+    dueTimerInterrupt.attachInterruptInterval(microseconds, callback);
 
-  return timerNumber;
+    uint16_t timerNumber = dueTimerInterrupt.getTimerNumber();
+
+    // Serial.print(TimerName);
+    // Serial.print(F(" attached to Timer("));
+    // Serial.print(timerNumber);
+    // Serial.println(F(")"));
+
+    return timerNumber;
 }
 
 void setup() {
     pinMode(LEDPIN, OUTPUT);
     pinMode(encBtn,INPUT_PULLUP);
+
+    // Initilize communication over serial line
     Serial.begin(9600);
     while(!Serial);
 
     // Initialize SD library
-
-    // Nano, Uno = 4
-    // Mega = 53
-    // Due = 4, 10, 52
-    const int chipSelect = 4;
-    while (!SD.begin(chipSelect)) {
-        Serial.println(F("Failed to initialize SD library"));
-        delay(1000);
-        break;
+    if (SD.begin(SD_CS) == false) {
+        Serial.println(F("WARNING: Failed to initialize SD library"));
+        delay(100);
     }
 
-    // Should load default config_obj if run for the first time
+    // Initialize EEPROM
+    eeprom.begin();
+    if (eeprom.isConnected() == false) {
+        Serial.println(F("ERROR: Can't find eeprom"));
+        Serial.println(F("WARNING: Loading default configuration"));
+    }
+
+    // Load conf from SD card
     Serial.println(F("Loading configuration..."));
-    loadConfiguration(filename, config_obj);
+    if(load_config_from_SD(filename, conf) == false) { // If loading from SD fails...
+        uint8_t eeprom_set = 0;
+        eeprom.get(0, eeprom_set); // Read from EEPROM if config was ever written to it
+        if (eeprom_set == 1) {
+            load_config_from_EEPROM(eeprom, conf); // If it was, load it
+        }
+        else {
+            conf.conf_in_eeprom = 1; // If it wasn't, set it as it was
+        }
+    }
+    update_config_to_EEPROM(eeprom, conf); // Save config to EEPROM
 
-    // Create configuration file
-    Serial.println(F("Saving configuration..."));
-    saveConfiguration(filename, config_obj);
+    conf.print();
 
-    // Dump config_obj file
-    Serial.println(F("Print config_obj file..."));
-    printFile(filename);
-
-    Serial.println("Menu 4.x");
-    Serial.println("Use keys + - * /");
+    Serial.println("INFO: Use keys '+', '-', '*', '/'");
     Serial.println("to control the menu navigation");
     Serial.flush();
-    // lcd.begin(16,2);
-    //   joystickBtns.begin();
 
+    // Initialize TFT LCD display
     tft.init();
     tft.setRotation(2);
-    // gfx.setTextSize(textScale);//test scalling
+    // gfx.setTextSize(textScale);
     tft.setTextWrap(true);
     tft.setTextSize(4);
     tft.fillScreen(Black);
     tft.setTextColor(White, Black);
 
-    // Use this calibration code in setup():
+    // Touch screen calibration
     uint16_t calData[5] = { 102, 3712, 67, 3863, 2 };
     tft.setTouch(calData);
 
     nav.showTitle = false;
     nav.idleTask = measure;
-    psu_init();
+    conf.calibration_voltage = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
     Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
     // Timer1.initialize(1000);
     // Timer1.attachInterrupt(timerIsr);
@@ -516,13 +527,7 @@ void setup() {
 
 bool blink(int timeOn,int timeOff) {return millis()%(unsigned long)(timeOn+timeOff)<(unsigned long)timeOn;}
 
-#define SOFT_DEBOUNCE_MS 100
-
-uint16_t x, y;
-
 void loop() {
     nav.poll();
     digitalWrite(LEDPIN, blink(timeOn,timeOff));
-    // tft.getTouchRaw(&x, &y);
-    // Serial.println("x: " + String(x) + ", y: " + String(y));
 }
