@@ -13,6 +13,7 @@ public:
     virtual float measure_voltage(uint32_t pin, const Config& conf) const;
     virtual float measure_current(uint32_t pin, const Config& conf) const;
     virtual float measure_power(const float& voltage, const float& current) const;
+    virtual float measure_consumption(const float& power, const Config& conf) const;
 
     // TODO: Implement this method
     // virtual double measure_consumption() const = 0;

@@ -88,7 +88,7 @@ private:
     Quantity* voltage;
     Quantity* current;
     Quantity* power;
-    //, consumption;
+    Quantity* consumption;
 
     float measure_voltage(uint32_t pin, const Config& conf) const override {
         unsigned int raw_voltage = analogRead(pin);
@@ -108,28 +108,36 @@ private:
         return voltage * current;
     }
 
+    float measure_consumption(const float& power, const Config& conf) const override {
+        return power / conf.measurement_delay / 1000 * 3600;
+    }
+
 public:
     Measurement() {
         // TODO: Allocate on stack if possible
         voltage = new Quantity(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V");
         current = new Quantity(measure_current(CURRENT_INPUT_PIN, conf), "A");
         power = new Quantity(measure_power(voltage->get_value(), current->get_value()), "W");
+        consumption = new Quantity(measure_consumption(power->get_value(), conf), "Wh");
     };
 
     ~Measurement() {
         delete voltage;
         delete current;
         delete power;
+        delete consumption;
     };
 
     template<typename O>
     void print(O& out) {
         out.setCursor(0, 0);
-        out.print(String(voltage->get_value() + " " + voltage->get_unit()));
+        out.print(String(voltage->get_value()) + " " + String(voltage->get_unit()));
         out.setCursor(0, 1);
-        out.print(String(current->get_value() + " " + current->get_unit()));
+        out.print(String(current->get_value()) + " " + String(current->get_unit()));
         out.setCursor(0, 2);
-        out.print(String(power->get_value() + " " + power->get_unit()));
+        out.print(String(power->get_value()) + " " + String(power->get_unit()));
+        out.setCursor(0, 3);
+        out.print(String(consumption->get_value()) + " " + String(consumption->get_unit()));
     }
 };
 
