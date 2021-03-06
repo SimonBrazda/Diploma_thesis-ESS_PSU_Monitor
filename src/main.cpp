@@ -11,6 +11,8 @@ www.r-site.net
 #include <SPI.h>
 #include <SD.h>
 
+#include <Wire.h>
+#include <RtcDS1307.h>
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
 #include <menu.h>
@@ -79,9 +81,26 @@ const char *filename = "/config.txt";  // <- SD library uses 8.3 filenames
 Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
 TFT_eSPI tft{};       // Invoke custom library
+RtcDS1307<TwoWire> rtc(Wire);
+#define countof(a) (sizeof(a) / sizeof(a[0])) // RTC thing, not sure whta it does. INSPECT!!!
 
 enum Eval{ Low, Fine, High};
 String eval_name[] = {"Low", "Fine", "High"};
+
+void printDateTime(const RtcDateTime& dt) {
+    char datestring[20];
+
+    snprintf_P(datestring, 
+            countof(datestring),
+            PSTR("%02u/%02u/%04u %02u:%02u:%02u"),
+            dt.Month(),
+            dt.Day(),
+            dt.Year(),
+            dt.Hour(),
+            dt.Minute(),
+            dt.Second() );
+    Serial.print(datestring);
+}
 
 class Measurement : public MeasurementTemplate {
 private:
@@ -89,6 +108,7 @@ private:
     Quantity* current;
     Quantity* power;
     Quantity* consumption;
+    RtcDateTime now = rtc.GetDateTime();
 
     float measure_voltage(uint32_t pin, const Config& conf) const override {
         unsigned int raw_voltage = analogRead(pin);
@@ -119,6 +139,7 @@ public:
         current = new Quantity(measure_current(CURRENT_INPUT_PIN, conf), "A");
         power = new Quantity(measure_power(voltage->get_value(), current->get_value()), "W");
         consumption = new Quantity(measure_consumption(power->get_value(), conf), "Wh");
+        // now = rtc.now();
     };
 
     ~Measurement() {
@@ -138,7 +159,15 @@ public:
         out.print(String(power->get_value()) + " " + String(power->get_unit()));
         out.setCursor(0, 3);
         out.print(String(consumption->get_value()) + " " + String(consumption->get_unit()));
+        out.setCursor(0, 4);
+        out.print(String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + 
+                String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
     }
+
+    Quantity* get_voltage() const { return voltage; }
+    Quantity* get_current() const { return current; }
+    Quantity* get_power() const { return power; }
+    Quantity* get_consumption() const { return consumption; }
 };
 
 // Loads the configuration from a file and sets default values
@@ -240,23 +269,25 @@ void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
     eeprom.put(0, conf);
 }
 
-// void log_measurement_to_SD(const Measurement& measurement, const String& filename) {
-//     String log = "";
-//     if (SD.exists(filename) == false)
-//     {
-//         log = "Voltage [V],Voltage State [LOW|FINE|HIGH],Current [A],Current State [LOW|FINE|HIGH]\n";
-//     }
+void log_measurement_to_SD(const Measurement& measurement, const String& filename) {
+    String log = "";
+    if (SD.exists(filename) == false)
+    {
+        log = "Voltage [V],Current [A],Power [W],Consumption [Wh]\n";
+    }
     
-    
-//     File file = SD.open(filename, FILE_WRITE);
-//     if (!file) {
-//         Serial.println(F("Failed to log the measurement"));
-//         return;
-//     }
-//     log += String(measurement.get_voltage().get_value()) + ",";
-//     file.println();
-//     file.close();
-// }
+    File file = SD.open(filename, FILE_WRITE);
+    if (!file) {
+        Serial.println(F("Failed to log the measurement"));
+        return;
+    }
+    log += (String(measurement.get_voltage()->get_value()) + "," +
+            String(measurement.get_current()->get_value()) + "," +
+            String(measurement.get_power()->get_value()) + "," + 
+            String(measurement.get_consumption()->get_value()));
+    file.println(log);
+    file.close();
+}
 
 unsigned int timeOn=1000;
 unsigned int timeOff=1000;
@@ -354,11 +385,8 @@ result measure(menuOut& o,idleEvent e) {
         last_measurement_time = millis();
         Measurement measurement;
         measurement.print(o);
-        // o.clear();
-        // o.setCursor(0, 0);
-        // o.print(String(measurement.get_voltage().get_value()) + " V");
-        // o.setCursor(0, 1);
-        // o.print(String(measurement.get_current().get_value()) + " A");
+        tft.endWrite();
+        // log_measurement_to_SD(measurement, "log.txt");
     }
     return proceed;
 }
@@ -413,9 +441,9 @@ void setup() {
     while(!Serial);
 
     // Initialize SD library
-    if (SD.begin(SD_CS) == false) {
+    if(SD.begin(SD_CS) == false) {
         Serial.println(F("WARNING: Failed to initialize SD library"));
-        delay(100);
+        delay(1000);
     }
 
     // Initialize EEPROM
@@ -440,6 +468,62 @@ void setup() {
     update_config_to_EEPROM(eeprom, conf); // Save config to EEPROM
 
     conf.print();
+
+     rtc.Begin();
+
+    RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
+    printDateTime(compiled);
+    Serial.println();
+
+    if (!rtc.IsDateTimeValid()) 
+    {
+        if (rtc.LastError() != 0)
+        {
+            // we have a communications error
+            // see https://www.arduino.cc/en/Reference/WireEndTransmission for 
+            // what the number means
+            Serial.print("RTC communications error = ");
+            Serial.println(rtc.LastError());
+        }
+        else
+        {
+            // Common Causes:
+            //    1) first time you ran and the device wasn't running yet
+            //    2) the battery on the device is low or even missing
+
+            Serial.println("RTC lost confidence in the DateTime!");
+            // following line sets the RTC to the date & time this sketch was compiled
+            // it will also reset the valid flag internally unless the Rtc device is
+            // having an issue
+
+            rtc.SetDateTime(compiled);
+        }
+    }
+
+    if (!rtc.GetIsRunning())
+    {
+        Serial.println("RTC was not actively running, starting now");
+        rtc.SetIsRunning(true);
+    }
+
+    RtcDateTime now = rtc.GetDateTime();
+    if (now < compiled) 
+    {
+        Serial.println("RTC is older than compile time!  (Updating DateTime)");
+        rtc.SetDateTime(compiled);
+    }
+    else if (now > compiled) 
+    {
+        Serial.println("RTC is newer than compile time. (this is expected)");
+    }
+    else if (now == compiled) 
+    {
+        Serial.println("RTC is the same as compile time! (not expected but all is fine)");
+    }
+
+    // never assume the Rtc was last configured by you, so
+    // just clear them to your needed state
+    rtc.SetSquareWavePin(DS1307SquareWaveOut_Low); 
 
     Serial.println("INFO: Use keys '+', '-', '*', '/'");
     Serial.println("to control the menu navigation");
