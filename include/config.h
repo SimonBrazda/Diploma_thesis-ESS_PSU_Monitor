@@ -18,3 +18,6 @@ struct Config {
 
     void print();
 };
+
+enum Eval{ None = 0, Low, Fine, High };
+// String eval_name[] = {"Low", "Fine", "High"};

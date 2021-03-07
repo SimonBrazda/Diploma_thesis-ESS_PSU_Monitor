@@ -4,14 +4,25 @@
 #include "config.h"
 
 class Quantity {
-private:
+protected:
     float value;
     String unit;
+    Eval eval;
+
+    Eval _evaluate(double min_value, double max_value) {
+        if (value < min_value) return Eval::Low;
+        if (value > max_value) return Eval::High;
+        return Eval::Fine;
+    }
 
 public:
-    Quantity(const float& value, const String& unit) : value(value), unit(unit) {}
+    Quantity(const float& value, const String& unit) : value(value), unit(unit), eval(Eval::None) {}
     
     ~Quantity() {}
+
+    void evaluate(double min_value, double max_value) {
+        eval = _evaluate(min_value, max_value);
+    }
 
     float get_value() const {
         return value;
@@ -20,4 +31,6 @@ public:
     String get_unit() const {
         return unit;
     }
+
+    Eval get_eval() const { return eval; }
 };

@@ -82,10 +82,7 @@ Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
 TFT_eSPI tft{};       // Invoke custom library
 RtcDS1307<TwoWire> rtc(Wire);
-#define countof(a) (sizeof(a) / sizeof(a[0])) // RTC thing, not sure whta it does. INSPECT!!!
-
-enum Eval{ Low, Fine, High};
-String eval_name[] = {"Low", "Fine", "High"};
+#define countof(a) (sizeof(a) / sizeof(a[0])) // RTC thing, not sure what it does. INSPECT!!!
 
 void printDateTime(const RtcDateTime& dt) {
     char datestring[20];
@@ -104,11 +101,11 @@ void printDateTime(const RtcDateTime& dt) {
 
 class Measurement : public MeasurementTemplate {
 private:
-    Quantity* voltage;
-    Quantity* current;
-    Quantity* power;
-    Quantity* consumption;
-    RtcDateTime now = rtc.GetDateTime();
+    Quantity voltage;
+    Quantity current;
+    Quantity power;
+    Quantity consumption;
+    RtcDateTime now;
 
     float measure_voltage(uint32_t pin, const Config& conf) const override {
         unsigned int raw_voltage = analogRead(pin);
@@ -133,41 +130,61 @@ private:
     }
 
 public:
-    Measurement() {
-        // TODO: Allocate on stack if possible
-        voltage = new Quantity(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V");
-        current = new Quantity(measure_current(CURRENT_INPUT_PIN, conf), "A");
-        power = new Quantity(measure_power(voltage->get_value(), current->get_value()), "W");
-        consumption = new Quantity(measure_consumption(power->get_value(), conf), "Wh");
-        // now = rtc.now();
-    };
+    Measurement() : voltage(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V"),
+                    current(measure_current(CURRENT_INPUT_PIN, conf), "A"),
+                    power(measure_power(voltage.get_value(), current.get_value()), "W"),
+                    consumption(measure_consumption(power.get_value(), conf), "Wh"),
+                    now(rtc.GetDateTime()) { };
 
-    ~Measurement() {
-        delete voltage;
-        delete current;
-        delete power;
-        delete consumption;
-    };
+    ~Measurement() { };
 
     template<typename O>
-    void print(O& out) {
-        out.setCursor(0, 0);
-        out.print(String(voltage->get_value()) + " " + String(voltage->get_unit()));
-        out.setCursor(0, 1);
-        out.print(String(current->get_value()) + " " + String(current->get_unit()));
-        out.setCursor(0, 2);
-        out.print(String(power->get_value()) + " " + String(power->get_unit()));
-        out.setCursor(0, 3);
-        out.print(String(consumption->get_value()) + " " + String(consumption->get_unit()));
-        out.setCursor(0, 4);
-        out.print(String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + 
+    void print(O& out, size_t index) {
+        out.setCursor(0, index);
+        out.print(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
                 String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        tft.setTextColor(White, Black);
     }
 
-    Quantity* get_voltage() const { return voltage; }
-    Quantity* get_current() const { return current; }
-    Quantity* get_power() const { return power; }
-    Quantity* get_consumption() const { return consumption; }
+    template<typename O, typename T, typename... Args>
+    void print(O& out, size_t index, T& arg, Args... args) {
+        // out.setCursor(0, 0);
+        // out.print(String(voltage.get_value()) + " " + String(voltage.get_unit()));
+        // out.setCursor(0, 1);
+        // out.print(String(current.get_value()) + " " + String(current.get_unit()));
+        // out.setCursor(0, 2);
+        // out.print(String(power.get_value()) + " " + String(power.get_unit()));
+        // out.setCursor(0, 3);
+        // out.print(String(consumption.get_value()) + " " + String(consumption.get_unit()));
+        // out.setCursor(0, 4);
+        // out.print(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
+        //         String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        switch (arg.get_eval()) {
+        case Eval::Low:
+            tft.setTextColor(Yellow, Black);
+            break;
+        case Eval::High:
+            tft.setTextColor(Red, Black);
+            break;
+        default:
+            break;
+        }
+
+        out.setCursor(0, index);
+        out.print(String(arg.get_value()) + " " + String(arg.get_unit()));
+        tft.setTextColor(White, Black);
+        print(out, index + 1, args...);
+    }
+
+    void evaluate_measurements() {
+        voltage.evaluate(conf.min_voltage, conf.max_voltage);
+        current.evaluate(conf.min_current, conf.max_current);
+    }
+
+    Quantity& get_voltage() { return voltage; }
+    Quantity& get_current() { return current; }
+    Quantity& get_power() { return power; }
+    Quantity& get_consumption() { return consumption; }
 };
 
 // Loads the configuration from a file and sets default values
@@ -269,7 +286,7 @@ void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
     eeprom.put(0, conf);
 }
 
-void log_measurement_to_SD(const Measurement& measurement, const String& filename) {
+void log_measurement_to_SD(Measurement& measurement, const String& filename) {
     String log = "";
     if (SD.exists(filename) == false)
     {
@@ -281,10 +298,10 @@ void log_measurement_to_SD(const Measurement& measurement, const String& filenam
         Serial.println(F("Failed to log the measurement"));
         return;
     }
-    log += (String(measurement.get_voltage()->get_value()) + "," +
-            String(measurement.get_current()->get_value()) + "," +
-            String(measurement.get_power()->get_value()) + "," + 
-            String(measurement.get_consumption()->get_value()));
+    log += (String(measurement.get_voltage().get_value()) + "," +
+            String(measurement.get_current().get_value()) + "," +
+            String(measurement.get_power().get_value()) + "," + 
+            String(measurement.get_consumption().get_value()));
     file.println(log);
     file.close();
 }
@@ -384,7 +401,8 @@ result measure(menuOut& o,idleEvent e) {
     {
         last_measurement_time = millis();
         Measurement measurement;
-        measurement.print(o);
+        measurement.evaluate_measurements();
+        measurement.print(o, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
         tft.endWrite();
         // log_measurement_to_SD(measurement, "log.txt");
     }

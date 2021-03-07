@@ -2,6 +2,7 @@
     "files.associations": {
         "menudefs.h": "c",
         "arduino.h": "c",
-        "known_16bit_timers.h": "c"
+        "known_16bit_timers.h": "c",
+        "print.h": "c"
     }
 }
