@@ -38,18 +38,18 @@ www.r-site.net
 #define LEDPIN LED_BUILTIN
 #define MAX_DEPTH 2
 
-#define CURRENT_INPUT_PIN A6
-#define VOLTAGE_INPUT_PIN A5
+#define CURRENT_INPUT_PIN A9
+#define VOLTAGE_INPUT_PIN A2
 
 #define SOFT_DEBOUNCE_MS 100
 
 unsigned long last_measurement_time = 0;
 
 // Encoder /////////////////////////////////////
-#define encA 25
-#define encB 24
+#define encA 11
+#define encB 12
 //this encoder has a button here
-#define encBtn 22
+#define encBtn 10
 #define encSteps 4
 
 #define Black RGB565(0,0,0)
@@ -143,6 +143,11 @@ public:
         out.setCursor(0, index);
         out.print(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
                 String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        #if SERIAL_DEBUG == 1
+        Serial.println(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
+                String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        Serial.println();
+        #endif
         tft.setTextColor(White, Black);
     }
 
@@ -172,6 +177,9 @@ public:
 
         out.setCursor(0, index);
         out.print(String(arg.get_value()) + " " + String(arg.get_unit()));
+        #if SERIAL_DEBUG == 1
+        Serial.println(String(arg.get_value()) + " " + String(arg.get_unit()));
+        #endif
         tft.setTextColor(White, Black);
         print(out, index + 1, args...);
     }
@@ -186,6 +194,38 @@ public:
     Quantity& get_power() { return power; }
     Quantity& get_consumption() { return consumption; }
 };
+
+template<typename O>
+void init_SD(O& tft_out) {
+    // Initialize SD library
+    for (byte i{}; i < 10; i++) {
+        if(SD.begin(SD_CS) == false) {
+            tft_out.clear();
+            tft_out.setCursor(0, 0);
+            tft_out.print("ERROR: Failed to mount SD");
+            tft_out.setCursor(0, 1);
+            tft_out.print("Try " + String(i) + "/10");
+            #if SERIAL_DEBUG == 1
+                Serial.println(F("ERROR: Failed to mount SD"));
+                Serial.println("Try " + String(i) + "/10");
+            #endif
+        } else {
+            tft_out.clear();
+            tft_out.setCursor(0, 0);
+            tft_out.print("INFO: SD card mounted successfully.");
+            #if SERIAL_DEBUG == 1
+                Serial.println("INFO: SD card mounted successfully.");
+            #endif
+            return;
+        }
+    }
+    tft_out.clear();
+    tft_out.setCursor(0, 0);
+    tft_out.print("WARNING: Could not mount SD card. Proceeding to load configuration from EEPROM. Measured data WILL NOT BE SAVED!!!");
+    #if SERIAL_DEBUG == 1
+        Serial.println("WARNING: Could not mount SD card. Proceeding to load configuration from EEPROM. Measured data WILL NOT BE SAVED!!!");
+    #endif
+}
 
 // Loads the configuration from a file and sets default values
 bool load_config_from_SD(const char *filename, Config &conf) {
@@ -252,12 +292,12 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     doc["R2"] = conf.R2;
     doc["resolution"] = conf.resolution;
 
-  // Serialize JSON to file with spaces and line-breaks
-  if (serializeJsonPretty(doc, file) == 0) {
-    Serial.println(F("Failed to write to file"));
-  }
+    // Serialize JSON to file with spaces and line-breaks
+    if (serializeJsonPretty(doc, file) == 0) {
+        Serial.println(F("Failed to write to file"));
+    }
 
-  file.close();
+    file.close();
 }
 
 // Prints the content of a file to the Serial
@@ -286,34 +326,64 @@ void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
     eeprom.put(0, conf);
 }
 
-void log_measurement_to_SD(Measurement& measurement, const String& filename) {
+bool log_measurement_to_SD(Measurement& measurement, const String& filename) {
+    #if INIT_SD == 1
+        if(SD.begin(SD_CS) == false) {
+            #if SERIAL_DEBUG == 1
+                Serial.println(F("ERROR: Failed to mount SD"));
+            #endif
+            return false;
+        } else {
+            #if SERIAL_DEBUG == 1
+                Serial.println("INFO: SD card mounted successfully.");
+            #endif
+        }
+    #endif
+    
     String log = "";
-    if (SD.exists(filename) == false)
-    {
+    if (SD.exists(filename) == false) {
         log = "Voltage [V],Current [A],Power [W],Consumption [Wh]\n";
     }
     
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
-        Serial.println(F("Failed to log the measurement"));
-        return;
+        Serial.println(F("ERROR: Failed to log the measurement"));
+        return false;
     }
+
     log += (String(measurement.get_voltage().get_value()) + "," +
             String(measurement.get_current().get_value()) + "," +
             String(measurement.get_power().get_value()) + "," + 
             String(measurement.get_consumption().get_value()));
-    file.println(log);
+    
+    file.println(log);  // Write the log to the file
+    if (file.getWriteError() != 0) {
+        Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+        file.close();
+        return false;
+    }
+
     file.close();
+    Serial.println("INFO: Measurement saved successfully");
+
+    #if INIT_SD == 1
+        SD.end();
+    #endif
+
+    return true;
 }
 
 unsigned int timeOn=1000;
 unsigned int timeOff=1000;
 
-result doMeasure(eventMask e, prompt &item);
+// result doMeasure(eventMask e, prompt &item);
 result showEvent(eventMask e,navNode& nav,prompt& item);
-result saveConfig();
-result printConfig();
-result dumpEEPROM();
+result eject_SD();
+result mount_SD();
+result load_config();
+result save_config();
+result print_config();
+result dump_EEPROM();
 
 MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
   ,FIELD(conf.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
@@ -325,14 +395,17 @@ MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
 );
 
 MENU(mainMenu, "Main Menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
-//   ,FIELD(timeOn,"On","ms",0,1000,10,1, Menu::doNothing, Menu::noEvent, Menu::noStyle)
-//   ,FIELD(timeOff,"Off","ms",0,10000,10,1,Menu::doNothing, Menu::noEvent, Menu::noStyle)
-  ,OP("Measure",doMeasure,enterEvent)
-  ,SUBMENU(settingsMenu)
-  ,OP("Save Config",saveConfig,Menu::enterEvent)
-  ,OP("Print Config",printConfig,Menu::enterEvent)
-  ,OP("Dump EEPROM",dumpEEPROM,Menu::enterEvent)
-  ,EXIT("<Back")
+//    ,FIELD(timeOn,"On","ms",0,1000,10,1, Menu::doNothing, Menu::noEvent, Menu::noStyle)
+//    ,FIELD(timeOff,"Off","ms",0,10000,10,1,Menu::doNothing, Menu::noEvent, Menu::noStyle)
+//    ,OP("Measure",doMeasure,enterEvent)
+    ,EXIT("Measure")
+    ,SUBMENU(settingsMenu)
+    ,OP("Eject SD",eject_SD,Menu::enterEvent)
+    ,OP("Mount SD",mount_SD,Menu::enterEvent)
+    ,OP("Load Config",load_config,Menu::enterEvent)
+    ,OP("Save Config",save_config,Menu::enterEvent)
+    ,OP("Print Config",print_config,Menu::enterEvent)
+    ,OP("Dump EEPROM",dump_EEPROM,Menu::enterEvent)
 );
 
 // Declare the clickencoder
@@ -394,41 +467,74 @@ float get_calibrated_ref_voltage(unsigned int n_calibrations) {
 }
 
 
-result measure(menuOut& o,idleEvent e) {
-    nav.idleChanged = true;
+// result measure(menuOut& o,idleEvent e) {
+//     nav.idleChanged = true;
 
+//     if (millis() - last_measurement_time > conf.measurement_delay)
+//     {
+//         last_measurement_time = millis();
+//         Measurement measurement;
+//         measurement.evaluate_measurements();
+//         measurement.print(o, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
+//         tft.endWrite();
+//         log_measurement_to_SD(measurement, "log.txt");
+//     }
+//     return proceed;
+// }
+
+void measure() {
     if (millis() - last_measurement_time > conf.measurement_delay)
     {
         last_measurement_time = millis();
         Measurement measurement;
         measurement.evaluate_measurements();
-        measurement.print(o, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
+        auto result = log_measurement_to_SD(measurement, "log.txt");
+        measurement.print(eSpiOut, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
+        if (result == false) {
+            eSpiOut.setCursor(0, 8);
+            eSpiOut.print("Log failed");
+        }
         tft.endWrite();
-        // log_measurement_to_SD(measurement, "log.txt");
     }
+}
+
+// result doMeasure(eventMask e, prompt &item) {
+//     nav.idleOn(measure);
+//     return proceed;
+// }
+
+result eject_SD() {
+    SD.end();
+    Serial.println();
+    Serial.println();
+    Serial.println("Card unmounted");
     return proceed;
 }
 
-result doMeasure(eventMask e, prompt &item) {
-    nav.idleOn(measure);
+result mount_SD() {
+    init_SD(eSpiOut);
     return proceed;
 }
 
-result saveConfig() {
+result load_config() {
+    load_config_from_SD(filename, conf);
+    return proceed;
+}
+
+result save_config() {
     save_config_to_SD(filename, conf);
     update_config_to_EEPROM(eeprom, conf);
     return proceed;
 }
 
-result printConfig() {
+result print_config() {
     Serial.println();
     Serial.println();
-    printFile(filename);
     conf.print();
     return proceed;
 }
 
-result dumpEEPROM() {
+result dump_EEPROM() {
     eeprom.dumpEEPROM(0, 256);
     return proceed;
 }
@@ -450,19 +556,105 @@ uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const c
     return timerNumber;
 }
 
+// Sd2Card card;
+// SdVolume volume;
+// SdFile root;
+
 void setup() {
     pinMode(LEDPIN, OUTPUT);
     pinMode(encBtn,INPUT_PULLUP);
+    // pinMode(10, OUTPUT); // change this to 53 on a mega  // don't follow this!!
+    // digitalWrite(10, HIGH); // Add this line
 
+    #if SERIAL_DEBUG == 1
     // Initilize communication over serial line
     Serial.begin(9600);
     while(!Serial);
+    #endif
+
+    // Initialize TFT LCD display
+    tft.init();
+    tft.setRotation(2);
+    // gfx.setTextSize(textScale);
+    tft.setTextWrap(true);
+    tft.setTextSize(4);
+    tft.fillScreen(Black);
+    tft.setTextColor(White, Black);
+
+    // Touch screen calibration
+    uint16_t calData[5] = { 102, 3712, 67, 3863, 2 };
+    tft.setTouch(calData);
 
     // Initialize SD library
-    if(SD.begin(SD_CS) == false) {
-        Serial.println(F("WARNING: Failed to initialize SD library"));
-        delay(1000);
-    }
+    init_SD(eSpiOut);
+
+//     Serial.print("\nInitializing SD card...");
+
+//   // we'll use the initialization code from the utility libraries
+//   // since we're just testing if the card is working!
+//   if (!card.init(SPI_HALF_SPEED, SD_CS)) {
+//     Serial.println("initialization failed. Things to check:");
+//     Serial.println("* is a card inserted?");
+//     Serial.println("* is your wiring correct?");
+//     Serial.println("* did you change the chipSelect pin to match your shield or module?");
+//     while (1);
+//   } else {
+//     Serial.println("Wiring is correct and a card is present.");
+//   }
+
+//   // print the type of card
+//   Serial.println();
+//   Serial.print("Card type:         ");
+//   switch (card.type()) {
+//     case SD_CARD_TYPE_SD1:
+//       Serial.println("SD1");
+//       break;
+//     case SD_CARD_TYPE_SD2:
+//       Serial.println("SD2");
+//       break;
+//     case SD_CARD_TYPE_SDHC:
+//       Serial.println("SDHC");
+//       break;
+//     default:
+//       Serial.println("Unknown");
+//   }
+
+//   // Now we will try to open the 'volume'/'partition' - it should be FAT16 or FAT32
+//   if (!volume.init(card)) {
+//     Serial.println("Could not find FAT16/FAT32 partition.\nMake sure you've formatted the card");
+//     while (1);
+//   }
+
+//   Serial.print("Clusters:          ");
+//   Serial.println(volume.clusterCount());
+//   Serial.print("Blocks x Cluster:  ");
+//   Serial.println(volume.blocksPerCluster());
+
+//   Serial.print("Total Blocks:      ");
+//   Serial.println(volume.blocksPerCluster() * volume.clusterCount());
+//   Serial.println();
+
+//   // print the type and size of the first FAT-type volume
+//   uint32_t volumesize;
+//   Serial.print("Volume type is:    FAT");
+//   Serial.println(volume.fatType(), DEC);
+
+//   volumesize = volume.blocksPerCluster();    // clusters are collections of blocks
+//   volumesize *= volume.clusterCount();       // we'll have a lot of clusters
+//   volumesize /= 2;                           // SD card blocks are always 512 bytes (2 blocks are 1KB)
+//   Serial.print("Volume size (Kb):  ");
+//   Serial.println(volumesize);
+//   Serial.print("Volume size (Mb):  ");
+//   volumesize /= 1024;
+//   Serial.println(volumesize);
+//   Serial.print("Volume size (Gb):  ");
+//   Serial.println((float)volumesize / 1024.0);
+
+//   Serial.println("\nFiles found on the card (name, date and size in bytes): ");
+//   root.openRoot(volume);
+
+//   // list all files in the card with date and size
+//   root.ls(LS_R | LS_DATE | LS_SIZE);
 
     // Initialize EEPROM
     eeprom.begin();
@@ -486,25 +678,22 @@ void setup() {
     update_config_to_EEPROM(eeprom, conf); // Save config to EEPROM
 
     conf.print();
+    SD.end();
 
-     rtc.Begin();
+    rtc.Begin();
 
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
     printDateTime(compiled);
     Serial.println();
 
-    if (!rtc.IsDateTimeValid()) 
-    {
-        if (rtc.LastError() != 0)
-        {
+    if (!rtc.IsDateTimeValid()) {
+        if (rtc.LastError() != 0) {
             // we have a communications error
             // see https://www.arduino.cc/en/Reference/WireEndTransmission for 
             // what the number means
             Serial.print("RTC communications error = ");
             Serial.println(rtc.LastError());
-        }
-        else
-        {
+        } else {
             // Common Causes:
             //    1) first time you ran and the device wasn't running yet
             //    2) the battery on the device is low or even missing
@@ -518,24 +707,20 @@ void setup() {
         }
     }
 
-    if (!rtc.GetIsRunning())
-    {
+    if (!rtc.GetIsRunning()) {
         Serial.println("RTC was not actively running, starting now");
         rtc.SetIsRunning(true);
     }
 
     RtcDateTime now = rtc.GetDateTime();
-    if (now < compiled) 
-    {
+    if (now < compiled) {
         Serial.println("RTC is older than compile time!  (Updating DateTime)");
         rtc.SetDateTime(compiled);
     }
-    else if (now > compiled) 
-    {
+    else if (now > compiled) {
         Serial.println("RTC is newer than compile time. (this is expected)");
     }
-    else if (now == compiled) 
-    {
+    else if (now == compiled) {
         Serial.println("RTC is the same as compile time! (not expected but all is fine)");
     }
 
@@ -547,26 +732,19 @@ void setup() {
     Serial.println("to control the menu navigation");
     Serial.flush();
 
-    // Initialize TFT LCD display
-    tft.init();
-    tft.setRotation(2);
-    // gfx.setTextSize(textScale);
-    tft.setTextWrap(true);
-    tft.setTextSize(4);
-    tft.fillScreen(Black);
-    tft.setTextColor(White, Black);
+    conf.calibration_voltage = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
+    eSpiOut.clear();
 
-    // Touch screen calibration
-    uint16_t calData[5] = { 102, 3712, 67, 3863, 2 };
-    tft.setTouch(calData);
+    Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
 
     nav.showTitle = false;
-    nav.idleTask = measure;
-    conf.calibration_voltage = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
-    Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
+    nav.timeOut = 300;  // Set the number of seconds of "inactivity" to auto enter idle state
+    nav.idleOn();
+    // nav.idleTask = measure;
+    
     // Timer1.initialize(1000);
     // Timer1.attachInterrupt(timerIsr);
-    nav.idleOn(measure);//this menu will start on idle state, press select to enter menu
+    // nav.idleOn(measure);//this menu will start on idle state, press select to enter menu
 }
 
 bool blink(int timeOn,int timeOff) {return millis()%(unsigned long)(timeOn+timeOff)<(unsigned long)timeOn;}
@@ -574,4 +752,7 @@ bool blink(int timeOn,int timeOff) {return millis()%(unsigned long)(timeOn+timeO
 void loop() {
     nav.poll();
     digitalWrite(LEDPIN, blink(timeOn,timeOff));
+    if (nav.sleepTask) {
+        measure();
+    }
 }

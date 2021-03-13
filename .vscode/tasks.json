@@ -9,13 +9,5 @@
             ],
             "label": "PlatformIO: Build in debug mode"
         },
-        {
-            "type": "PlatformIO",
-            "task": "Pre-Debug (nanoatmega328)",
-            "problemMatcher": [
-                "$platformio"
-            ],
-            "label": "PlatformIO: Build in debug mode (nanoatmega328)"
-        }
     ]
 }

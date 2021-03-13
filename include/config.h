@@ -1,6 +1,9 @@
 #pragma once
 #include <Arduino.h>
 
+#define INIT_SD 1
+#define SERIAL_DEBUG 1
+
 struct Config {
     uint8_t conf_in_eeprom = 0;
     unsigned int n_calibrations = 40;
