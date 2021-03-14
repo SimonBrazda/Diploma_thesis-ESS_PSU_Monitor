@@ -17,7 +17,8 @@ struct Config {
     unsigned int R2 = 47000;
     unsigned short resolution = 4096;
     float reference_voltage = 3.30F;
-    float calibration_voltage = 0.39F;
+    float current_calibration = 0.39F;
+    float voltage_calibration = 0.00F;
 
     void print();
 };

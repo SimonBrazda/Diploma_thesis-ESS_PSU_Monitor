@@ -13,6 +13,7 @@
         Serial.println("R2 " + String(R2));
         Serial.println("resolution " + String(resolution));
         Serial.println("reference_voltage " + String(reference_voltage));
-        Serial.println("calibration_voltage " + String(calibration_voltage));
+        Serial.println("current_calibration " + String(current_calibration));
+        Serial.println("calibration_voltage " + String(voltage_calibration));
         Serial.println("\tDone...");
     }

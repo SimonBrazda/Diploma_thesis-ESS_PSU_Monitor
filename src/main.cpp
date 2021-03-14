@@ -77,14 +77,14 @@ const colorDef<uint16_t> colors[6] MEMMODE={
   {{(uint16_t)White,(uint16_t)Yellow},{(uint16_t)Blue,  (uint16_t)Red,   (uint16_t)Red}},//titleColor
 };
 
-const char *filename = "/config.txt";  // <- SD library uses 8.3 filenames
+const char *filename = "/config.json";  // <- SD library uses 8.3 filenames
 Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
 TFT_eSPI tft{};       // Invoke custom library
 RtcDS1307<TwoWire> rtc(Wire);
 #define countof(a) (sizeof(a) / sizeof(a[0])) // RTC thing, not sure what it does. INSPECT!!!
 
-void printDateTime(const RtcDateTime& dt) {
+String getDateTime(const RtcDateTime& dt) {
     char datestring[20];
 
     snprintf_P(datestring, 
@@ -96,12 +96,13 @@ void printDateTime(const RtcDateTime& dt) {
             dt.Hour(),
             dt.Minute(),
             dt.Second() );
-    Serial.print(datestring);
+    return String(datestring);
 }
 
 class Measurement : public MeasurementTemplate {
 private:
     Quantity voltage;
+    Quantity converted_voltage;
     Quantity current;
     Quantity power;
     Quantity consumption;
@@ -111,13 +112,18 @@ private:
         unsigned int raw_voltage = analogRead(pin);
         float voltage = conf.reference_voltage / conf.resolution * raw_voltage;
         voltage *= (conf.R1 + conf.R2) / conf.R2;
-        return voltage;
+        return voltage >= 0 ? voltage : 0;
+    }
+
+    float measure_converted_voltage(const Config& conf) const {
+        float result = voltage.get_value() * (conf.R1 + conf.R2) / conf.R2 - conf.voltage_calibration;
+        return result >= 0 ? result : 0;
     }
 
     float measure_current(uint32_t pin, const Config& conf) const override {
         unsigned int raw_current_voltage = analogRead(pin);
         float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage;
-        float current = (current_voltage - conf.calibration_voltage) / conf.sensitivity;
+        float current = (current_voltage - conf.current_calibration) / conf.sensitivity;
         return current > 0 ? current : 0;
     }
 
@@ -131,8 +137,9 @@ private:
 
 public:
     Measurement() : voltage(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V"),
+                    converted_voltage(measure_converted_voltage(conf), "V"),
                     current(measure_current(CURRENT_INPUT_PIN, conf), "A"),
-                    power(measure_power(voltage.get_value(), current.get_value()), "W"),
+                    power(measure_power(converted_voltage.get_value(), current.get_value()), "W"),
                     consumption(measure_consumption(power.get_value(), conf), "Wh"),
                     now(rtc.GetDateTime()) { };
 
@@ -141,11 +148,9 @@ public:
     template<typename O>
     void print(O& out, size_t index) {
         out.setCursor(0, index);
-        out.print(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
-                String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        out.print(String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
         #if SERIAL_DEBUG == 1
-        Serial.println(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
-                String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        Serial.println(String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
         Serial.println();
         #endif
         tft.setTextColor(White, Black);
@@ -153,17 +158,6 @@ public:
 
     template<typename O, typename T, typename... Args>
     void print(O& out, size_t index, T& arg, Args... args) {
-        // out.setCursor(0, 0);
-        // out.print(String(voltage.get_value()) + " " + String(voltage.get_unit()));
-        // out.setCursor(0, 1);
-        // out.print(String(current.get_value()) + " " + String(current.get_unit()));
-        // out.setCursor(0, 2);
-        // out.print(String(power.get_value()) + " " + String(power.get_unit()));
-        // out.setCursor(0, 3);
-        // out.print(String(consumption.get_value()) + " " + String(consumption.get_unit()));
-        // out.setCursor(0, 4);
-        // out.print(/*String(now.Year(), DEC) + "/" + String(now.Month(), DEC) + "/" + String(now.Day(), DEC) + " " + */
-        //         String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
         switch (arg.get_eval()) {
         case Eval::Low:
             tft.setTextColor(Yellow, Black);
@@ -185,14 +179,16 @@ public:
     }
 
     void evaluate_measurements() {
-        voltage.evaluate(conf.min_voltage, conf.max_voltage);
+        converted_voltage.evaluate(conf.min_voltage, conf.max_voltage);
         current.evaluate(conf.min_current, conf.max_current);
     }
 
     Quantity& get_voltage() { return voltage; }
+    Quantity& get_converted_voltage() { return converted_voltage; }
     Quantity& get_current() { return current; }
     Quantity& get_power() { return power; }
     Quantity& get_consumption() { return consumption; }
+    RtcDateTime get_date_time() const { return now; }
 };
 
 template<typename O>
@@ -258,7 +254,8 @@ bool load_config_from_SD(const char *filename, Config &conf) {
     conf.R2 = doc["R2"] | conf.R2;
     conf.resolution = doc["resolution"] | conf.resolution;
     conf.reference_voltage = doc["reference_voltage"] | conf.reference_voltage;
-    conf.calibration_voltage = doc["calibration_voltage"] | conf.calibration_voltage;
+    conf.current_calibration = doc["current_calibration"] | conf.current_calibration;
+    conf.voltage_calibration = doc["voltage_calibration"] | conf.voltage_calibration;
 
     file.close();
     return true;
@@ -278,9 +275,10 @@ void save_config_to_SD(const char *filename, const Config &conf) {
 
     // Allocate a temporary JsonDocument
     // Use arduinojson.org/assistant to compute your file capacity the capacity.
-    StaticJsonDocument<256> doc;
+    StaticJsonDocument<512> doc;
 
     // Set the values in the document
+    doc["conf_in_eeprom"] | conf.conf_in_eeprom;
     doc["n_calibrations"] = conf.n_calibrations;
     doc["max_voltage"] = conf.max_voltage;
     doc["min_voltage"] = conf.min_voltage;
@@ -291,6 +289,9 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     doc["R1"] = conf.R1;
     doc["R2"] = conf.R2;
     doc["resolution"] = conf.resolution;
+    doc["reference_voltage"] = conf.reference_voltage;
+    doc["current_calibration"] = conf.current_calibration;
+    doc["voltage_calibration"] = conf.voltage_calibration;
 
     // Serialize JSON to file with spaces and line-breaks
     if (serializeJsonPretty(doc, file) == 0) {
@@ -342,7 +343,7 @@ bool log_measurement_to_SD(Measurement& measurement, const String& filename) {
     
     String log = "";
     if (SD.exists(filename) == false) {
-        log = "Voltage [V],Current [A],Power [W],Consumption [Wh]\n";
+        log = "DateTime [YY/MM/DD HH:MM:SS],Voltage [V],State [None=0|Low|Fine|High],Current [A],State [None=0|Low|Fine|High],Power [W],Consumption [Wh]\n";
     }
     
     File file = SD.open(filename, FILE_WRITE);
@@ -351,8 +352,11 @@ bool log_measurement_to_SD(Measurement& measurement, const String& filename) {
         return false;
     }
 
-    log += (String(measurement.get_voltage().get_value()) + "," +
+    log += (getDateTime(measurement.get_date_time()) + "," +
+            String(measurement.get_converted_voltage().get_value()) + "," +
+            String(measurement.get_converted_voltage().get_eval()) + "," +
             String(measurement.get_current().get_value()) + "," +
+            String(measurement.get_current().get_eval()) + "," +
             String(measurement.get_power().get_value()) + "," + 
             String(measurement.get_consumption().get_value()));
     
@@ -384,6 +388,19 @@ result load_config();
 result save_config();
 result print_config();
 result dump_EEPROM();
+result calibrate_voltage();
+
+// uint16_t year=2017;
+// uint16_t month=10;
+// uint16_t day=7;
+
+// PADMENU(date,"Date",showEvent,anyEvent,noStyle
+//   ,FIELD(year,"","/",1900,3000,20,1,showEvent,anyEvent,noStyle)
+//   ,FIELD(month,"","/",1,12,1,0,showEvent,anyEvent,wrapStyle)
+//   ,FIELD(day,"","",1,31,1,0,showEvent,anyEvent,wrapStyle)
+// );
+
+float reference_voltage = 12.00F;
 
 MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
   ,FIELD(conf.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
@@ -391,6 +408,8 @@ MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
   ,FIELD(conf.max_current,"Max"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
   ,FIELD(conf.min_current,"Min"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
   ,FIELD(conf.measurement_delay,"Delay"," ms",100,60000,1000,100,doNothing,noEvent,noStyle)
+  ,FIELD(reference_voltage,"Calibration Voltage"," V",0,16,1,0.1,calibrate_voltage,exitEvent,noStyle)
+//   ,SUBMENU(date)
   ,EXIT("<Back")
 );
 
@@ -458,29 +477,13 @@ float get_calibrated_ref_voltage(unsigned int n_calibrations) {
     for (size_t i = 0; i < n_calibrations; i++)
     {
         value += analogRead(CURRENT_INPUT_PIN);
-        delay(40);
+        delay(60);
     }
     
-    float avg_value = value / (n_calibrations - 1);
+    float avg_value = value / n_calibrations;
     Serial.println("Done!");
     return conf.reference_voltage / conf.resolution * avg_value;
 }
-
-
-// result measure(menuOut& o,idleEvent e) {
-//     nav.idleChanged = true;
-
-//     if (millis() - last_measurement_time > conf.measurement_delay)
-//     {
-//         last_measurement_time = millis();
-//         Measurement measurement;
-//         measurement.evaluate_measurements();
-//         measurement.print(o, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
-//         tft.endWrite();
-//         log_measurement_to_SD(measurement, "log.txt");
-//     }
-//     return proceed;
-// }
 
 void measure() {
     if (millis() - last_measurement_time > conf.measurement_delay)
@@ -488,8 +491,11 @@ void measure() {
         last_measurement_time = millis();
         Measurement measurement;
         measurement.evaluate_measurements();
-        auto result = log_measurement_to_SD(measurement, "log.txt");
-        measurement.print(eSpiOut, 0, measurement.get_voltage(), measurement.get_current(), measurement.get_power(), measurement.get_consumption());
+        auto result = log_measurement_to_SD(measurement, "log.csv");
+        measurement.print(eSpiOut, 0, measurement.get_voltage(),
+                                      measurement.get_converted_voltage(),
+                                      measurement.get_current(), measurement.get_power(),
+                                      measurement.get_consumption());
         if (result == false) {
             eSpiOut.setCursor(0, 8);
             eSpiOut.print("Log failed");
@@ -497,11 +503,6 @@ void measure() {
         tft.endWrite();
     }
 }
-
-// result doMeasure(eventMask e, prompt &item) {
-//     nav.idleOn(measure);
-//     return proceed;
-// }
 
 result eject_SD() {
     SD.end();
@@ -539,6 +540,16 @@ result dump_EEPROM() {
     return proceed;
 }
 
+result calibrate_voltage() {
+    float total = 0;
+    for (byte i = 0; i < 10; i++) {
+        Measurement measurement{};
+        total += measurement.get_converted_voltage().get_value();
+    }
+    conf.voltage_calibration = total / 10 - reference_voltage;
+    return proceed;
+}
+
 uint16_t Timer1_Index = 0;
 
 uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const char* TimerName) {
@@ -555,10 +566,6 @@ uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const c
 
     return timerNumber;
 }
-
-// Sd2Card card;
-// SdVolume volume;
-// SdFile root;
 
 void setup() {
     pinMode(LEDPIN, OUTPUT);
@@ -588,74 +595,6 @@ void setup() {
     // Initialize SD library
     init_SD(eSpiOut);
 
-//     Serial.print("\nInitializing SD card...");
-
-//   // we'll use the initialization code from the utility libraries
-//   // since we're just testing if the card is working!
-//   if (!card.init(SPI_HALF_SPEED, SD_CS)) {
-//     Serial.println("initialization failed. Things to check:");
-//     Serial.println("* is a card inserted?");
-//     Serial.println("* is your wiring correct?");
-//     Serial.println("* did you change the chipSelect pin to match your shield or module?");
-//     while (1);
-//   } else {
-//     Serial.println("Wiring is correct and a card is present.");
-//   }
-
-//   // print the type of card
-//   Serial.println();
-//   Serial.print("Card type:         ");
-//   switch (card.type()) {
-//     case SD_CARD_TYPE_SD1:
-//       Serial.println("SD1");
-//       break;
-//     case SD_CARD_TYPE_SD2:
-//       Serial.println("SD2");
-//       break;
-//     case SD_CARD_TYPE_SDHC:
-//       Serial.println("SDHC");
-//       break;
-//     default:
-//       Serial.println("Unknown");
-//   }
-
-//   // Now we will try to open the 'volume'/'partition' - it should be FAT16 or FAT32
-//   if (!volume.init(card)) {
-//     Serial.println("Could not find FAT16/FAT32 partition.\nMake sure you've formatted the card");
-//     while (1);
-//   }
-
-//   Serial.print("Clusters:          ");
-//   Serial.println(volume.clusterCount());
-//   Serial.print("Blocks x Cluster:  ");
-//   Serial.println(volume.blocksPerCluster());
-
-//   Serial.print("Total Blocks:      ");
-//   Serial.println(volume.blocksPerCluster() * volume.clusterCount());
-//   Serial.println();
-
-//   // print the type and size of the first FAT-type volume
-//   uint32_t volumesize;
-//   Serial.print("Volume type is:    FAT");
-//   Serial.println(volume.fatType(), DEC);
-
-//   volumesize = volume.blocksPerCluster();    // clusters are collections of blocks
-//   volumesize *= volume.clusterCount();       // we'll have a lot of clusters
-//   volumesize /= 2;                           // SD card blocks are always 512 bytes (2 blocks are 1KB)
-//   Serial.print("Volume size (Kb):  ");
-//   Serial.println(volumesize);
-//   Serial.print("Volume size (Mb):  ");
-//   volumesize /= 1024;
-//   Serial.println(volumesize);
-//   Serial.print("Volume size (Gb):  ");
-//   Serial.println((float)volumesize / 1024.0);
-
-//   Serial.println("\nFiles found on the card (name, date and size in bytes): ");
-//   root.openRoot(volume);
-
-//   // list all files in the card with date and size
-//   root.ls(LS_R | LS_DATE | LS_SIZE);
-
     // Initialize EEPROM
     eeprom.begin();
     if (eeprom.isConnected() == false) {
@@ -683,7 +622,7 @@ void setup() {
     rtc.Begin();
 
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
-    printDateTime(compiled);
+    Serial.println(getDateTime(compiled));
     Serial.println();
 
     if (!rtc.IsDateTimeValid()) {
@@ -732,13 +671,13 @@ void setup() {
     Serial.println("to control the menu navigation");
     Serial.flush();
 
-    conf.calibration_voltage = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
+    conf.current_calibration = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
     eSpiOut.clear();
 
     Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
 
     nav.showTitle = false;
-    nav.timeOut = 300;  // Set the number of seconds of "inactivity" to auto enter idle state
+    // nav.timeOut = 300;  // Set the number of seconds of "inactivity" to auto enter idle state
     nav.idleOn();
     // nav.idleTask = measure;
     
