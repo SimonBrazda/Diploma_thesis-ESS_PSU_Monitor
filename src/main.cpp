@@ -33,10 +33,9 @@ www.r-site.net
 #include "EEPROM_vars.h"
 #include "config.h"
 #include "quantity.h"
-#include "measurement.h"
 
 #define LEDPIN LED_BUILTIN
-#define MAX_DEPTH 2
+#define MAX_DEPTH 3
 
 #define CURRENT_INPUT_PIN A9
 #define VOLTAGE_INPUT_PIN A2
@@ -99,65 +98,132 @@ String getDateTime(const RtcDateTime& dt) {
     return String(datestring);
 }
 
-class Measurement : public MeasurementTemplate {
-private:
-    Quantity voltage;
-    Quantity converted_voltage;
-    Quantity current;
-    Quantity power;
-    Quantity consumption;
-    RtcDateTime now;
+String getDate(const RtcDateTime& dt) {
+    char datestring[11];
 
-    float measure_voltage(uint32_t pin, const Config& conf) const override {
-        unsigned int raw_voltage = analogRead(pin);
+    snprintf_P(datestring, 
+            countof(datestring),
+            PSTR("%04u/%02u/%02u"),
+            dt.Year(),
+            dt.Month(),
+            dt.Day() );
+    return String(datestring);
+}
+
+String getTime(const RtcDateTime& dt) {
+    char datestring[9];
+
+    snprintf_P(datestring, 
+            countof(datestring),
+            PSTR("%02u:%02u:%02u"),
+            dt.Hour(),
+            dt.Minute(),
+            dt.Second() );
+    return String(datestring);
+}
+
+void setDateTime(uint16_t* o_date, uint16_t* o_time) {
+    RtcDateTime now = rtc.GetDateTime();
+    *o_date = FAT_DATE(now.Year(), now.Month(), now.Day());
+    *o_time = FAT_DATE(now.Hour(), now.Minute(), now.Second());
+}
+
+#define textScale 4
+#define defaultTextW 6
+#define defaultTextH 9
+
+const int charW = defaultTextW * textScale;
+const int charH = defaultTextH * textScale;
+
+const panel panels[] MEMMODE = {{0, 0, TFT_WIDTH / defaultTextW,TFT_HEIGHT / defaultTextH}};
+navNode* nodes[sizeof(panels) / sizeof(panel)]; //navNodes to store navigation status
+panelsList pList(panels, nodes, 1); //a list of panels and nodes
+idx_t eSpiTops[MAX_DEPTH]={0};
+TFT_eSPIOut eSpiOut(tft,colors,eSpiTops,pList,charW,charH+1);
+
+class Measurement {
+public:
+    // Quantity voltage;
+    // Quantity converted_voltage;
+    // Quantity current;
+    // Quantity power;
+    // Quantity consumption;
+    // RtcDateTime now;
+
+    #if DEBUG_MEASUREMENT == 1
+        static uint32_t raw_voltage(uint32_t pin) { return analogRead(pin); }
+        static float voltage(float raw_voltage) {
+            auto result = conf.reference_voltage / conf.resolution * raw_voltage;
+            return result > 0 ? result : 0;
+        }
+        static float converted_voltage(float voltage) {
+            auto result = voltage * (conf.R1 + conf.R2) / conf.R2 + conf.voltage_calibration;
+            return result > 0 ? result : 0;
+        }
+        static uint32_t raw_current_voltage(uint32_t pin) { return analogRead(pin); }
+        static uint32_t uncalibrated_raw_current_voltage(uint32_t raw_current_voltage, const Config& conf) {
+            auto result = raw_current_voltage - conf.current_calibration;
+            return result > 0 ? result : 0;
+        }
+        static float current_voltage(uint32_t raw_current_voltage, const Config& conf) {
+            auto result = conf.reference_voltage / conf.resolution * (raw_current_voltage - conf.current_calibration) * 182400 / 120300;
+            return result > 0 ? result : 0;
+        }
+        static float current(float current_voltage, const Config& conf) { return current_voltage / conf.sensitivity; }
+        static float consumption(const float& power, const Config& conf) { return power / conf.measurement_delay / 1000 * 3600; }
+    #endif
+
+    static float measure_voltage(uint32_t pin, const Config& conf) {
+        auto raw_voltage = analogRead(pin);
         float voltage = conf.reference_voltage / conf.resolution * raw_voltage;
-        voltage *= (conf.R1 + conf.R2) / conf.R2;
+        // voltage *= (conf.R1 + conf.R2) / conf.R2;
         return voltage >= 0 ? voltage : 0;
     }
 
-    float measure_converted_voltage(const Config& conf) const {
-        float result = voltage.get_value() * (conf.R1 + conf.R2) / conf.R2 - conf.voltage_calibration;
+    static float measure_converted_voltage(float voltage, const Config& conf) {
+        float result = voltage * (conf.R1 + conf.R2) / conf.R2 + conf.voltage_calibration;
         return result >= 0 ? result : 0;
     }
 
-    float measure_current(uint32_t pin, const Config& conf) const override {
+    static float measure_current(uint32_t pin, const Config& conf) {
         unsigned int raw_current_voltage = analogRead(pin);
-        float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage;
-        float current = (current_voltage - conf.current_calibration) / conf.sensitivity;
+        float current_voltage = conf.reference_voltage / conf.resolution * raw_current_voltage * 182400 / 120300 - conf.current_calibration;
+        float current = current_voltage / conf.sensitivity;
         return current > 0 ? current : 0;
     }
 
-    float measure_power(const float& voltage, const float& current) const override {
+    static float measure_power(const float& voltage, const float& current) {
         return voltage * current;
     }
 
-    float measure_consumption(const float& power, const Config& conf) const override {
+    static float measure_consumption(const float& power, const Config& conf) {
         return power / conf.measurement_delay / 1000 * 3600;
     }
 
 public:
-    Measurement() : voltage(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V"),
-                    converted_voltage(measure_converted_voltage(conf), "V"),
-                    current(measure_current(CURRENT_INPUT_PIN, conf), "A"),
-                    power(measure_power(converted_voltage.get_value(), current.get_value()), "W"),
-                    consumption(measure_consumption(power.get_value(), conf), "Wh"),
-                    now(rtc.GetDateTime()) { };
+    // Measurement() : voltage(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V"),
+                    // converted_voltage(measure_converted_voltage(conf), "V"),
+                    // current(measure_current(CURRENT_INPUT_PIN, conf), "A"),
+                    // power(measure_power(converted_voltage.get_value(), current.get_value()), "W"),
+                    // consumption(measure_consumption(power.get_value(), conf), "Wh"),
+                    // now(rtc.GetDateTime()) { };
 
-    ~Measurement() { };
+    // ~Measurement() { };
 
+    #if DEBUG_MEASUREMENT == 0
     template<typename O>
-    void print(O& out, size_t index) {
+    static void print(O& out, const RtcDateTime& now, size_t index) {
         out.setCursor(0, index);
-        out.print(String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        out.print(getTime(now));
         #if SERIAL_DEBUG == 1
-        Serial.println(String(now.Hour(), DEC) + ":" + String(now.Minute(), DEC) + ":" + String(now.Second(), DEC));
+        Serial.println(getTime(now));
         Serial.println();
         #endif
         tft.setTextColor(White, Black);
     }
 
     template<typename O, typename T, typename... Args>
-    void print(O& out, size_t index, T& arg, Args... args) {
+    static void print(O& out, const RtcDateTime& now, size_t index, T& arg, Args... args) {
         switch (arg.get_eval()) {
         case Eval::Low:
             tft.setTextColor(Yellow, Black);
@@ -175,26 +241,46 @@ public:
         Serial.println(String(arg.get_value()) + " " + String(arg.get_unit()));
         #endif
         tft.setTextColor(White, Black);
-        print(out, index + 1, args...);
+        print(out, now, index + 1, args...);
+    }
+    #endif
+
+    #if DEBUG_MEASUREMENT == 1
+    template<typename O>
+    static void print(O& out, const RtcDateTime& now, size_t index) {
+        out.setCursor(0, index);
+        out.print(getTime(now));
+        #if SERIAL_DEBUG == 1
+        Serial.println(getTime(now));
+        Serial.println();
+        #endif
+        tft.setTextColor(White, Black);
     }
 
-    void evaluate_measurements() {
-        converted_voltage.evaluate(conf.min_voltage, conf.max_voltage);
-        current.evaluate(conf.min_current, conf.max_current);
+    template<typename O, typename T, typename... Args>
+    static void print(O& out, const RtcDateTime& now, size_t index, T& arg, Args... args) {
+        out.setCursor(0, index);
+        out.print(String(arg));
+        #if SERIAL_DEBUG == 1
+        Serial.println(String(arg));
+        #endif
+        tft.setTextColor(White, Black);
+        print(out, now, index + 1, args...);
     }
+    #endif
 
-    Quantity& get_voltage() { return voltage; }
-    Quantity& get_converted_voltage() { return converted_voltage; }
-    Quantity& get_current() { return current; }
-    Quantity& get_power() { return power; }
-    Quantity& get_consumption() { return consumption; }
-    RtcDateTime get_date_time() const { return now; }
+    // Quantity& get_voltage() { return voltage; }
+    // Quantity& get_converted_voltage() { return converted_voltage; }
+    // Quantity& get_current() { return current; }
+    // Quantity& get_power() { return power; }
+    // Quantity& get_consumption() { return consumption; }
+    // RtcDateTime get_date_time() const { return now; }
 };
 
 template<typename O>
-void init_SD(O& tft_out) {
+void init_SD(size_t count, O& tft_out) {
     // Initialize SD library
-    for (byte i{}; i < 10; i++) {
+    for (byte i{}; i < count; i++) {
         if(SD.begin(SD_CS) == false) {
             tft_out.clear();
             tft_out.setCursor(0, 0);
@@ -266,6 +352,7 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     // Delete existing file, otherwise the configuration is appended to the file
     SD.remove(filename);
 
+    SdFile::dateTimeCallback(setDateTime);
     // Open file for writing
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
@@ -327,56 +414,6 @@ void update_config_to_EEPROM(EEPROM& eeprom, const Config& conf) {
     eeprom.put(0, conf);
 }
 
-bool log_measurement_to_SD(Measurement& measurement, const String& filename) {
-    #if INIT_SD == 1
-        if(SD.begin(SD_CS) == false) {
-            #if SERIAL_DEBUG == 1
-                Serial.println(F("ERROR: Failed to mount SD"));
-            #endif
-            return false;
-        } else {
-            #if SERIAL_DEBUG == 1
-                Serial.println("INFO: SD card mounted successfully.");
-            #endif
-        }
-    #endif
-    
-    String log = "";
-    if (SD.exists(filename) == false) {
-        log = "DateTime [YY/MM/DD HH:MM:SS],Voltage [V],State [None=0|Low|Fine|High],Current [A],State [None=0|Low|Fine|High],Power [W],Consumption [Wh]\n";
-    }
-    
-    File file = SD.open(filename, FILE_WRITE);
-    if (!file) {
-        Serial.println(F("ERROR: Failed to log the measurement"));
-        return false;
-    }
-
-    log += (getDateTime(measurement.get_date_time()) + "," +
-            String(measurement.get_converted_voltage().get_value()) + "," +
-            String(measurement.get_converted_voltage().get_eval()) + "," +
-            String(measurement.get_current().get_value()) + "," +
-            String(measurement.get_current().get_eval()) + "," +
-            String(measurement.get_power().get_value()) + "," + 
-            String(measurement.get_consumption().get_value()));
-    
-    file.println(log);  // Write the log to the file
-    if (file.getWriteError() != 0) {
-        Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
-        file.close();
-        return false;
-    }
-
-    file.close();
-    Serial.println("INFO: Measurement saved successfully");
-
-    #if INIT_SD == 1
-        SD.end();
-    #endif
-
-    return true;
-}
-
 unsigned int timeOn=1000;
 unsigned int timeOff=1000;
 
@@ -389,18 +426,50 @@ result save_config();
 result print_config();
 result dump_EEPROM();
 result calibrate_voltage();
+result load_date(eventMask e);
+result load_time(eventMask e);
 
-// uint16_t year=2017;
-// uint16_t month=10;
-// uint16_t day=7;
+//custom field print
+//implementing a customized menu component
+//this numeric field prints formatted number with leading zeros
+template<typename T>
+class timeField : public menuField<T> {
+public:
+    timeField(constMEM menuFieldShadow<T>& shadow):menuField<T>(shadow) {}
+    Used printTo(navRoot &root,bool sel,menuOut& out, idx_t idx,idx_t len) {
+        menuField<T>::reflex=menuField<T>::target();
+        prompt::printTo(root,sel,out,idx,len);
+        bool ed=this==root.navFocus;
+        // out.print((root.navFocus==this&&sel)?(menuField<T>::tunning?'>':':'):' ');
+        out.setColor(valColor,sel,menuField<T>::enabled,ed);
+        char buffer[]="      ";
+        sprintf(buffer, "%03d", menuField<T>::reflex);
+        out.print(buffer);
+        out.setColor(unitColor,sel,menuField<T>::enabled,ed);
+        print_P(out,menuField<T>::units(),len);
+        return len;
+    }
+};
 
-// PADMENU(date,"Date",showEvent,anyEvent,noStyle
-//   ,FIELD(year,"","/",1900,3000,20,1,showEvent,anyEvent,noStyle)
-//   ,FIELD(month,"","/",1,12,1,0,showEvent,anyEvent,wrapStyle)
-//   ,FIELD(day,"","",1,31,1,0,showEvent,anyEvent,wrapStyle)
-// );
+uint16_t year = 2021;
+uint16_t month = 1;
+uint16_t day = 1;
 
-float reference_voltage = 12.00F;
+uint16_t hour = 12;
+uint16_t minute = 0;
+uint16_t second = 0;
+
+PADMENU(date_m,"",load_date,anyEvent,noStyle
+  ,altFIELD(timeField,year,"","/",1900,3000,1,0,doNothing,anyEvent,noStyle)
+  ,altFIELD(timeField,month,"","/",1,12,1,0,doNothing,anyEvent,wrapStyle)
+  ,altFIELD(timeField,day,"","",1,31,1,0,doNothing,anyEvent,wrapStyle)
+);
+
+PADMENU(time_m,"",load_time,anyEvent,noStyle
+  ,altFIELD(timeField,hour,"",":",0,23,1,0,doNothing,anyEvent,noStyle)
+  ,altFIELD(timeField,minute,"",":",0,59,1,0,doNothing,anyEvent,wrapStyle)
+  ,altFIELD(timeField,second,"","",0,59,1,0,doNothing,anyEvent,wrapStyle)
+);
 
 MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
   ,FIELD(conf.max_voltage,"Max"," V",0,30,1,0.01,doNothing,noEvent,noStyle)
@@ -408,8 +477,9 @@ MENU(settingsMenu,"Settings",Menu::doNothing,Menu::anyEvent,Menu::wrapStyle
   ,FIELD(conf.max_current,"Max"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
   ,FIELD(conf.min_current,"Min"," A",0,10,1,0.01,doNothing,noEvent,noStyle)
   ,FIELD(conf.measurement_delay,"Delay"," ms",100,60000,1000,100,doNothing,noEvent,noStyle)
-  ,FIELD(reference_voltage,"Calibration Voltage"," V",0,16,1,0.1,calibrate_voltage,exitEvent,noStyle)
-//   ,SUBMENU(date)
+  ,FIELD(conf.intended_voltage,"Calibration Voltage"," V",0,16,1,0,calibrate_voltage,exitEvent,noStyle)
+  ,SUBMENU(date_m)
+  ,SUBMENU(time_m)
   ,EXIT("<Back")
 );
 
@@ -431,19 +501,6 @@ MENU(mainMenu, "Main Menu", Menu::doNothing, Menu::noEvent, Menu::wrapStyle
 // Disable doubleclicks in setup makes the response faster.  See: https://github.com/soligen2010/encoder/issues/6
 ClickEncoder clickEncoder = ClickEncoder(encA, encB, encBtn, encSteps);
 ClickEncoderStream encStream(clickEncoder, 1);
-
-#define textScale 6
-#define defaultTextW 6
-#define defaultTextH 9
-
-const int charW = defaultTextW * textScale;
-const int charH = defaultTextH * textScale;
-
-const panel panels[] MEMMODE = {{0, 0, TFT_WIDTH / defaultTextW,TFT_HEIGHT / defaultTextH}};
-navNode* nodes[sizeof(panels) / sizeof(panel)]; //navNodes to store navigation status
-panelsList pList(panels, nodes, 1); //a list of panels and nodes
-idx_t eSpiTops[MAX_DEPTH]={0};
-TFT_eSPIOut eSpiOut(tft,colors,eSpiTops,pList,charW,charH+1);
 
 idx_t serialTops[MAX_DEPTH]={0};
 serialOut outSerial(Serial,serialTops);
@@ -468,40 +525,233 @@ void timerIsr() {clickEncoder.service();}
 
 NAVROOT(nav,mainMenu,MAX_DEPTH,in,out);
 
-float get_calibrated_ref_voltage(unsigned int n_calibrations) {
+size_t get_calibrated_ref_value(unsigned int n_calibrations) {
     tft.println("Calibrating...");
     Serial.println("Calibrating...");
 
-    int value = 0;
+    size_t value = 0;
+    delay(1000);
 
     for (size_t i = 0; i < n_calibrations; i++)
     {
-        value += analogRead(CURRENT_INPUT_PIN);
+        value  += analogRead(CURRENT_INPUT_PIN);
         delay(60);
     }
     
-    float avg_value = value / n_calibrations;
+    auto avg_value = value / n_calibrations;
+    eSpiOut.print(avg_value);
+    Serial.println(avg_value);
     Serial.println("Done!");
-    return conf.reference_voltage / conf.resolution * avg_value;
+    delay(2000);
+    return avg_value;
 }
 
-void measure() {
-    if (millis() - last_measurement_time > conf.measurement_delay)
-    {
+struct MyMeasurement {
+    #if DEBUG_MEASUREMENT == 0
+        const Quantity& voltage;
+        const EvaluatableQuantity& converted_voltage;
+        const EvaluatableQuantity& current;
+        const Quantity& power;
+        const Quantity& consumption;
+    #endif
+        #if DEBUG_MEASUREMENT == 1
+        uint32_t raw_voltage;
+        float voltage;
+        float converted_voltage;
+        uint32_t raw_current_voltage;
+        uint32_t uncalibrated_raw_current_voltage;
+        float current_voltage;
+        float current;
+        float power;
+        float consumption;
+    #endif
+    const RtcDateTime& now;
+
+public:
+    #if DEBUG_MEASUREMENT == 0
+    MyMeasurement(const Quantity& voltage,
+                  const EvaluatableQuantity& converted_voltage,
+                  const EvaluatableQuantity& current,
+                  const Quantity& power,
+                  const Quantity& consumption,
+                  const RtcDateTime& now) :
+                  voltage{ voltage },
+                  converted_voltage{ converted_voltage },
+                  current{ current },
+                  power{ power },
+                  consumption{ consumption },
+                  now{ now } {}
+    #endif
+    #if DEBUG_MEASUREMENT == 1
+    MyMeasurement(const RtcDateTime& now) : raw_voltage{ Measurement::raw_current_voltage(VOLTAGE_INPUT_PIN) },
+                      voltage{ Measurement::voltage(raw_voltage) },
+                      converted_voltage{ Measurement::converted_voltage(voltage) },
+                      raw_current_voltage{ Measurement::raw_current_voltage(CURRENT_INPUT_PIN) },
+                      uncalibrated_raw_current_voltage{ Measurement::uncalibrated_raw_current_voltage(raw_current_voltage, conf) },
+                      current_voltage{ Measurement::current_voltage(raw_current_voltage, conf) },
+                      current{ Measurement::current(current_voltage, conf) },
+                      power{ Measurement::measure_power(converted_voltage, current) },
+                      consumption{ Measurement::consumption(power, conf) },
+                      now{ now } {}
+    #endif
+
+    #if DEBUG_MEASUREMENT == 0
+    bool log_to_SD(const String& filename) {
+        #if INIT_SD == 1
+            if(SD.begin(SD_CS) == false) {
+                #if SERIAL_DEBUG == 1
+                    Serial.println(F("ERROR: Failed to mount SD"));
+                #endif
+                return false;
+            } else {
+                #if SERIAL_DEBUG == 1
+                    Serial.println("INFO: SD card mounted successfully.");
+                #endif
+            }
+        #endif
+        
+        String final_filename = String(now.Day()) + "-" + String(now.Month()) + ".csv";
+        Serial.println(final_filename);
+        String log = "";
+        if (SD.exists(final_filename) == false) {
+            log = "Time [HH:MM:SS],Voltage [V],State [None=0|Low|Fine|High],Current [A],State [None=0|Low|Fine|High],Power [W],Consumption [Wh]\n";
+        }
+        
+        SdFile::dateTimeCallback(setDateTime);
+        File file = SD.open(final_filename, FILE_WRITE);
+        if (!file) {
+            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            return false;
+        }
+
+        log += (getTime(now) + "," +
+                String(converted_voltage.get_value()) + "," +
+                String(converted_voltage.get_eval()) + "," +
+                String(current.get_value()) + "," +
+                String(current.get_eval()) + "," +
+                String(power.get_value()) + "," + 
+                String(consumption.get_value()));
+        
+        file.println(log);  // Write the log to the file
+        if (file.getWriteError() != 0) {
+            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            file.close();
+            return false;
+        }
+
+        file.close();
+        Serial.println("INFO: Measurement saved successfully");
+
+        #if INIT_SD == 1
+            SD.end();
+        #endif
+
+        return true;
+    }
+    #endif
+
+    #if DEBUG_MEASUREMENT == 1
+    bool log_to_SD(const String& filename) {
+        #if INIT_SD == 1
+        if(SD.begin(SD_CS) == false) {
+            #if SERIAL_DEBUG == 1
+            Serial.println(F("ERROR: Failed to mount SD"));
+            #endif
+            return false;
+        } else {
+            #if SERIAL_DEBUG == 1
+            Serial.println("INFO: SD card mounted successfully.");
+            #endif
+        }
+        #endif
+        
+        String final_filename = String(now.Day()) + "-" + String(now.Month()) + "-d" + ".csv";
+        String log = "";
+        if (SD.exists(final_filename) == false) {
+            log = "Time [HH:MM:SS],Raw Voltage,Voltage [V],Converted Voltage [V],Raw Current,Current Voltage [V],Current [A],Power [W],Consumption [Wh]\n";
+        }
+        
+        SdFile::dateTimeCallback(setDateTime);
+        File file = SD.open(final_filename, FILE_WRITE);
+        if (!file) {
+            Serial.println(F("ERROR: Failed to log the measurement"));
+            return false;
+        }
+
+        log += (getTime(now) + "," +
+                String(raw_voltage) + "," +
+                String(voltage) + "," +
+                String(converted_voltage) + "," +
+                String(converted_voltage) + "," +
+                String(raw_current_voltage) + "," +
+                String(current_voltage) + "," +
+                String(current) + "," +
+                String(power) + "," + 
+                String(consumption));
+        
+        file.println(log);  // Write the log to the file
+        if (file.getWriteError() != 0) {
+            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            file.close();
+            return false;
+        }
+
+        file.close();
+        Serial.println("INFO: Measurement saved successfully");
+
+        #if INIT_SD == 1
+        SD.end();
+        #endif
+
+        return true;
+    }
+    #endif
+};
+
+bool is_calibrated = false;
+
+bool measure() {
+    if (millis() - last_measurement_time > conf.measurement_delay) {
         last_measurement_time = millis();
-        Measurement measurement;
-        measurement.evaluate_measurements();
-        auto result = log_measurement_to_SD(measurement, "log.csv");
-        measurement.print(eSpiOut, 0, measurement.get_voltage(),
-                                      measurement.get_converted_voltage(),
-                                      measurement.get_current(), measurement.get_power(),
-                                      measurement.get_consumption());
+        #if DEBUG_MEASUREMENT == 0
+        Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
+        EvaluatableQuantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V", conf.min_voltage, conf.max_voltage };
+        EvaluatableQuantity current{ Measurement::measure_current(CURRENT_INPUT_PIN, conf), "A", conf.min_current, conf.max_current };
+        Quantity power{ Measurement::measure_power(converted_voltage.get_value(), current.get_value()), "W" };
+        Quantity consumption{ Measurement::measure_consumption(power.get_value(), conf), "Wh" };
+        RtcDateTime now{ rtc.GetDateTime() };
+        MyMeasurement measurement{ voltage, converted_voltage, current, power, consumption, now };
+        #endif
+        #if DEBUG_MEASUREMENT == 1
+        RtcDateTime now{ rtc.GetDateTime() };
+        MyMeasurement measurement{ now };
+        #endif
+        auto result = measurement.log_to_SD("log");
+        #if DEBUG_MEASUREMENT == 1
+        Measurement::print(eSpiOut, measurement.now, 0, measurement.raw_voltage,
+                                                        measurement.voltage,
+                                                        measurement.converted_voltage,
+                                                        measurement.raw_current_voltage,
+                                                        measurement.uncalibrated_raw_current_voltage,
+                                                        measurement.current_voltage,
+                                                        measurement.current,
+                                                        measurement.power,
+                                                        measurement.consumption);
+        #endif
+        #if DEBUG_MEASUREMENT == 0
+        Measurement::print(eSpiOut, measurement.now, 0, measurement.converted_voltage,
+                                                        measurement.current,
+                                                        measurement.power,
+                                                        measurement.consumption);
+        #endif
         if (result == false) {
-            eSpiOut.setCursor(0, 8);
+            eSpiOut.setCursor(0, 9);
             eSpiOut.print("Log failed");
         }
         tft.endWrite();
+        return result;
     }
+    return false;
 }
 
 result eject_SD() {
@@ -513,7 +763,7 @@ result eject_SD() {
 }
 
 result mount_SD() {
-    init_SD(eSpiOut);
+    init_SD(10, eSpiOut);
     return proceed;
 }
 
@@ -543,10 +793,42 @@ result dump_EEPROM() {
 result calibrate_voltage() {
     float total = 0;
     for (byte i = 0; i < 10; i++) {
-        Measurement measurement{};
-        total += measurement.get_converted_voltage().get_value();
+        Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
+        Quantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V" };
+        total += converted_voltage.get_value();
     }
-    conf.voltage_calibration = total / 10 - reference_voltage;
+    conf.voltage_calibration = conf.intended_voltage - total / 10;
+    eSpiOut.print(conf.voltage_calibration);
+    return proceed;
+}
+
+result load_date(eventMask e) {
+    auto now = rtc.GetDateTime();
+    if (e == eventMask::enterEvent) {
+        year = now.Year();
+        month = now.Month();
+        day = now.Day();
+        return proceed;
+    }
+    if (e == eventMask::exitEvent) {
+        now = RtcDateTime(year, month, day, now.Hour(), now.Minute(), now.Second());
+        rtc.SetDateTime(now);
+    }
+    return proceed;
+}
+
+result load_time(eventMask e) {
+    auto now = rtc.GetDateTime();
+    if (e == eventMask::enterEvent) {
+        hour = now.Hour();
+        minute = now.Minute();
+        second = now.Second();
+        return proceed;
+    }
+    if (e == eventMask::exitEvent) {
+        now = RtcDateTime(now.Year(), now.Month(), now.Day(), hour, minute, second);
+        rtc.SetDateTime(now);
+    }
     return proceed;
 }
 
@@ -570,6 +852,9 @@ uint16_t attachDueInterrupt(double microseconds, timerCallback callback, const c
 void setup() {
     pinMode(LEDPIN, OUTPUT);
     pinMode(encBtn,INPUT_PULLUP);
+    pinMode(CURRENT_INPUT_PIN, INPUT);
+    pinMode(VOLTAGE_INPUT_PIN, INPUT);
+    analogReadResolution(12);
     // pinMode(10, OUTPUT); // change this to 53 on a mega  // don't follow this!!
     // digitalWrite(10, HIGH); // Add this line
 
@@ -593,7 +878,7 @@ void setup() {
     tft.setTouch(calData);
 
     // Initialize SD library
-    init_SD(eSpiOut);
+    init_SD(1, eSpiOut);
 
     // Initialize EEPROM
     eeprom.begin();
@@ -671,7 +956,12 @@ void setup() {
     Serial.println("to control the menu navigation");
     Serial.flush();
 
-    conf.current_calibration = get_calibrated_ref_voltage(conf.n_calibrations); // Calibrate reference voltage
+    conf.current_calibration = get_calibrated_ref_value(conf.n_calibrations) + 245; // Calibrate reference voltage
+    Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
+    Quantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V" };
+    conf.voltage_calibration = conf.intended_voltage - converted_voltage.get_value();
+    eSpiOut.print(conf.voltage_calibration);
+    delay(2000);
     eSpiOut.clear();
 
     Timer1_Index = attachDueInterrupt(1000, timerIsr, "Timer1");
@@ -686,12 +976,13 @@ void setup() {
     // nav.idleOn(measure);//this menu will start on idle state, press select to enter menu
 }
 
-bool blink(int timeOn,int timeOff) {return millis()%(unsigned long)(timeOn+timeOff)<(unsigned long)timeOn;}
+bool blink(size_t timeOn, size_t timeOff, bool logged) { return millis() % (timeOn + timeOff) < timeOn && logged; }
 
 void loop() {
     nav.poll();
-    digitalWrite(LEDPIN, blink(timeOn,timeOff));
+    // digitalWrite(LEDPIN, blink(timeOn,timeOff));
     if (nav.sleepTask) {
-        measure();
+        auto result = measure();
+        digitalWrite(LEDPIN, blink(100, conf.measurement_delay - 100, result));
     }
 }

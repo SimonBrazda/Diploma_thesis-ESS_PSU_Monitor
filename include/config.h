@@ -3,6 +3,7 @@
 
 #define INIT_SD 1
 #define SERIAL_DEBUG 1
+#define DEBUG_MEASUREMENT 1
 
 struct Config {
     uint8_t conf_in_eeprom = 0;
@@ -17,8 +18,9 @@ struct Config {
     unsigned int R2 = 47000;
     unsigned short resolution = 4096;
     float reference_voltage = 3.30F;
-    float current_calibration = 0.39F;
+    uint32_t current_calibration = 400;
     float voltage_calibration = 0.00F;
+    float intended_voltage = 12.00F;
 
     void print();
 };
