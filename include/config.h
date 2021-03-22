@@ -21,6 +21,7 @@ struct Config {
     uint32_t current_calibration = 400;
     float voltage_calibration = 0.00F;
     float intended_voltage = 12.00F;
+    uint32_t current_correction = 245;
 
     void print();
 };

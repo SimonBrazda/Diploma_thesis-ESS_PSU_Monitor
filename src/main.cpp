@@ -76,7 +76,7 @@ const colorDef<uint16_t> colors[6] MEMMODE={
   {{(uint16_t)White,(uint16_t)Yellow},{(uint16_t)Blue,  (uint16_t)Red,   (uint16_t)Red}},//titleColor
 };
 
-const char *filename = "/config.json";  // <- SD library uses 8.3 filenames
+const char *filename = "config";  // <- SD library uses 8.3 filenames
 Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
 TFT_eSPI tft{};       // Invoke custom library
@@ -143,13 +143,6 @@ TFT_eSPIOut eSpiOut(tft,colors,eSpiTops,pList,charW,charH+1);
 
 class Measurement {
 public:
-    // Quantity voltage;
-    // Quantity converted_voltage;
-    // Quantity current;
-    // Quantity power;
-    // Quantity consumption;
-    // RtcDateTime now;
-
     #if DEBUG_MEASUREMENT == 1
         static uint32_t raw_voltage(uint32_t pin) { return analogRead(pin); }
         static float voltage(float raw_voltage) {
@@ -161,12 +154,12 @@ public:
             return result > 0 ? result : 0;
         }
         static uint32_t raw_current_voltage(uint32_t pin) { return analogRead(pin); }
-        static uint32_t uncalibrated_raw_current_voltage(uint32_t raw_current_voltage, const Config& conf) {
-            auto result = raw_current_voltage - conf.current_calibration;
+        static long uncalibrated_raw_current_voltage(uint32_t raw_current_voltage, const Config& conf) {
+            auto result = (long)(raw_current_voltage - conf.current_calibration);
             return result > 0 ? result : 0;
         }
         static float current_voltage(uint32_t raw_current_voltage, const Config& conf) {
-            auto result = conf.reference_voltage / conf.resolution * (raw_current_voltage - conf.current_calibration) * 182400 / 120300;
+            auto result = conf.reference_voltage / conf.resolution * (long)(raw_current_voltage - conf.current_calibration) * 182400 / 120300;
             return result > 0 ? result : 0;
         }
         static float current(float current_voltage, const Config& conf) { return current_voltage / conf.sensitivity; }
@@ -201,15 +194,6 @@ public:
     }
 
 public:
-    // Measurement() : voltage(measure_voltage(VOLTAGE_INPUT_PIN, conf), "V"),
-                    // converted_voltage(measure_converted_voltage(conf), "V"),
-                    // current(measure_current(CURRENT_INPUT_PIN, conf), "A"),
-                    // power(measure_power(converted_voltage.get_value(), current.get_value()), "W"),
-                    // consumption(measure_consumption(power.get_value(), conf), "Wh"),
-                    // now(rtc.GetDateTime()) { };
-
-    // ~Measurement() { };
-
     #if DEBUG_MEASUREMENT == 0
     template<typename O>
     static void print(O& out, const RtcDateTime& now, size_t index) {
@@ -268,13 +252,6 @@ public:
         print(out, now, index + 1, args...);
     }
     #endif
-
-    // Quantity& get_voltage() { return voltage; }
-    // Quantity& get_converted_voltage() { return converted_voltage; }
-    // Quantity& get_current() { return current; }
-    // Quantity& get_power() { return power; }
-    // Quantity& get_consumption() { return consumption; }
-    // RtcDateTime get_date_time() const { return now; }
 };
 
 template<typename O>
@@ -311,6 +288,8 @@ void init_SD(size_t count, O& tft_out) {
 
 // Loads the configuration from a file and sets default values
 bool load_config_from_SD(const char *filename, Config &conf) {
+    init_SD(1, eSpiOut);
+    
     // Open file for reading
     File file = SD.open(filename);
 
@@ -324,6 +303,7 @@ bool load_config_from_SD(const char *filename, Config &conf) {
         Serial.println(F("Failed to read file"));
         Serial.println(error.c_str());
         file.close();
+        SD.end();
         return false;
     }
 
@@ -342,13 +322,17 @@ bool load_config_from_SD(const char *filename, Config &conf) {
     conf.reference_voltage = doc["reference_voltage"] | conf.reference_voltage;
     conf.current_calibration = doc["current_calibration"] | conf.current_calibration;
     conf.voltage_calibration = doc["voltage_calibration"] | conf.voltage_calibration;
+    conf.intended_voltage = doc["intended_voltage"] | conf.intended_voltage;
+    conf.current_correction = doc["current_correction"] | conf.current_correction;
 
     file.close();
+    SD.end();
     return true;
 }
 
 // Saves the configuration to a file
 void save_config_to_SD(const char *filename, const Config &conf) {
+    init_SD(1, eSpiOut);
     // Delete existing file, otherwise the configuration is appended to the file
     SD.remove(filename);
 
@@ -379,6 +363,8 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     doc["reference_voltage"] = conf.reference_voltage;
     doc["current_calibration"] = conf.current_calibration;
     doc["voltage_calibration"] = conf.voltage_calibration;
+    doc["intended_voltage"] = conf.intended_voltage;
+    doc["current_correction"] = conf.current_correction;
 
     // Serialize JSON to file with spaces and line-breaks
     if (serializeJsonPretty(doc, file) == 0) {
@@ -386,10 +372,12 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     }
 
     file.close();
+    SD.end();
 }
 
 // Prints the content of a file to the Serial
 void printFile(const char *filename) {
+    init_SD(1, eSpiOut);
     // Open file for reading
     File file = SD.open(filename);
     if (!file) {
@@ -404,6 +392,7 @@ void printFile(const char *filename) {
     Serial.println();
 
     file.close();
+    SD.end();
 }
 
 void load_config_from_EEPROM(EEPROM& eeprom, Config& conf) {
@@ -559,7 +548,7 @@ struct MyMeasurement {
         float voltage;
         float converted_voltage;
         uint32_t raw_current_voltage;
-        uint32_t uncalibrated_raw_current_voltage;
+        long uncalibrated_raw_current_voltage;
         float current_voltage;
         float current;
         float power;
@@ -877,9 +866,6 @@ void setup() {
     uint16_t calData[5] = { 102, 3712, 67, 3863, 2 };
     tft.setTouch(calData);
 
-    // Initialize SD library
-    init_SD(1, eSpiOut);
-
     // Initialize EEPROM
     eeprom.begin();
     if (eeprom.isConnected() == false) {
@@ -902,7 +888,6 @@ void setup() {
     update_config_to_EEPROM(eeprom, conf); // Save config to EEPROM
 
     conf.print();
-    SD.end();
 
     rtc.Begin();
 
@@ -956,7 +941,7 @@ void setup() {
     Serial.println("to control the menu navigation");
     Serial.flush();
 
-    conf.current_calibration = get_calibrated_ref_value(conf.n_calibrations) + 245; // Calibrate reference voltage
+    conf.current_calibration = get_calibrated_ref_value(conf.n_calibrations) + conf.current_correction; // Calibrate reference voltage
     Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
     Quantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V" };
     conf.voltage_calibration = conf.intended_voltage - converted_voltage.get_value();
