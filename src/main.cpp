@@ -76,6 +76,25 @@ const colorDef<uint16_t> colors[6] MEMMODE={
   {{(uint16_t)White,(uint16_t)Yellow},{(uint16_t)Blue,  (uint16_t)Red,   (uint16_t)Red}},//titleColor
 };
 
+struct SerialBoth {
+    template<typename T>
+    static void println(const T& msg) {
+        Serial.println(msg);
+        SerialUSB.println(msg);
+    }
+
+    static void println() {
+        Serial.println();
+        SerialUSB.println();
+    }
+
+    template<typename T>
+    static void print(const T& msg) {
+        Serial.print(msg);
+        SerialUSB.print(msg);
+    }
+};
+
 const char *filename = "config";  // <- SD library uses 8.3 filenames
 Config conf{};                         // <- global configuration object
 EEPROM eeprom(0x50, I2C_DEVICESIZE_24LC04);
@@ -145,24 +164,24 @@ class Measurement {
 public:
     #if DEBUG_MEASUREMENT == 1
         static uint32_t raw_voltage(uint32_t pin) { return analogRead(pin); }
-        static float voltage(float raw_voltage) {
+        static float voltage(uint32_t raw_voltage) {
             auto result = conf.reference_voltage / conf.resolution * raw_voltage;
             return result > 0 ? result : 0;
         }
         static float converted_voltage(float voltage) {
-            auto result = voltage * (conf.R1 + conf.R2) / conf.R2 + conf.voltage_calibration;
+            auto result = voltage * (conf.R1 + conf.R2) / conf.R2;// + conf.voltage_calibration;
             return result > 0 ? result : 0;
         }
         static uint32_t raw_current_voltage(uint32_t pin) { return analogRead(pin); }
-        static long uncalibrated_raw_current_voltage(uint32_t raw_current_voltage, const Config& conf) {
-            auto result = (long)(raw_current_voltage - conf.current_calibration);
+        static float uncalibrated_current_voltage(uint32_t raw_current_voltage, const Config& conf) {
+            auto result = conf.reference_voltage / conf.resolution * raw_current_voltage * 182400 / 120300;
             return result > 0 ? result : 0;
         }
         static float current_voltage(uint32_t raw_current_voltage, const Config& conf) {
-            auto result = conf.reference_voltage / conf.resolution * (long)(raw_current_voltage - conf.current_calibration) * 182400 / 120300;
-            return result > 0 ? result : 0;
+            auto result = conf.reference_voltage / conf.resolution * raw_current_voltage * 182400 / 120300 - 0.5;
+            return result;// > 0 ? result : 0;
         }
-        static float current(float current_voltage, const Config& conf) { return current_voltage / conf.sensitivity; }
+        static float current(float current_voltage, const Config& conf) { return current_voltage / conf.sensitivity + 0.1652; }
         static float consumption(const float& power, const Config& conf) { return power / conf.measurement_delay / 1000 * 3600; }
     #endif
 
@@ -200,8 +219,8 @@ public:
         out.setCursor(0, index);
         out.print(getTime(now));
         #if SERIAL_DEBUG == 1
-        Serial.println(getTime(now));
-        Serial.println();
+        SerialBoth::println(getTime(now));
+        SerialBoth::println();
         #endif
         tft.setTextColor(White, Black);
     }
@@ -222,7 +241,7 @@ public:
         out.setCursor(0, index);
         out.print(String(arg.get_value()) + " " + String(arg.get_unit()));
         #if SERIAL_DEBUG == 1
-        Serial.println(String(arg.get_value()) + " " + String(arg.get_unit()));
+        SerialBoth::println(String(arg.get_value()) + " " + String(arg.get_unit()));
         #endif
         tft.setTextColor(White, Black);
         print(out, now, index + 1, args...);
@@ -235,8 +254,8 @@ public:
         out.setCursor(0, index);
         out.print(getTime(now));
         #if SERIAL_DEBUG == 1
-        Serial.println(getTime(now));
-        Serial.println();
+        SerialBoth::println(getTime(now));
+        SerialBoth::println();
         #endif
         tft.setTextColor(White, Black);
     }
@@ -246,7 +265,7 @@ public:
         out.setCursor(0, index);
         out.print(String(arg));
         #if SERIAL_DEBUG == 1
-        Serial.println(String(arg));
+        SerialBoth::println(String(arg));
         #endif
         tft.setTextColor(White, Black);
         print(out, now, index + 1, args...);
@@ -265,24 +284,24 @@ void init_SD(size_t count, O& tft_out) {
             tft_out.setCursor(0, 1);
             tft_out.print("Try " + String(i) + "/10");
             #if SERIAL_DEBUG == 1
-                Serial.println(F("ERROR: Failed to mount SD"));
-                Serial.println("Try " + String(i) + "/10");
+                SerialBoth::println(F("ERROR: Failed to mount SD"));
+                SerialBoth::println("Try " + String(i) + "/10");
             #endif
         } else {
             tft_out.clear();
             tft_out.setCursor(0, 0);
             tft_out.print("INFO: SD card mounted successfully.");
             #if SERIAL_DEBUG == 1
-                Serial.println("INFO: SD card mounted successfully.");
+                SerialBoth::println("INFO: SD card mounted successfully.");
             #endif
             return;
         }
     }
     tft_out.clear();
     tft_out.setCursor(0, 0);
-    tft_out.print("WARNING: Could not mount SD card. Proceeding to load configuration from EEPROM. Measured data WILL NOT BE SAVED!!!");
+    tft_out.print("WARNING: Could not mount SD card.");
     #if SERIAL_DEBUG == 1
-        Serial.println("WARNING: Could not mount SD card. Proceeding to load configuration from EEPROM. Measured data WILL NOT BE SAVED!!!");
+        SerialBoth::println("WARNING: Could not mount SD card. Proceeding to load configuration from EEPROM. Measured data WILL NOT BE SAVED!!!");
     #endif
 }
 
@@ -300,8 +319,8 @@ bool load_config_from_SD(const char *filename, Config &conf) {
     // Deserialize the JSON document
     DeserializationError error = deserializeJson(doc, file);
     if (error) {
-        Serial.println(F("Failed to read file"));
-        Serial.println(error.c_str());
+        SerialBoth::println(F("Failed to read file"));
+        SerialBoth::println(error.c_str());
         file.close();
         SD.end();
         return false;
@@ -340,7 +359,7 @@ void save_config_to_SD(const char *filename, const Config &conf) {
     // Open file for writing
     File file = SD.open(filename, FILE_WRITE);
     if (!file) {
-        Serial.println(F("Failed to create file"));
+        SerialBoth::println(F("Failed to create file"));
         return;
     }
 
@@ -368,7 +387,7 @@ void save_config_to_SD(const char *filename, const Config &conf) {
 
     // Serialize JSON to file with spaces and line-breaks
     if (serializeJsonPretty(doc, file) == 0) {
-        Serial.println(F("Failed to write to file"));
+        SerialBoth::println(F("Failed to write to file"));
     }
 
     file.close();
@@ -381,15 +400,15 @@ void printFile(const char *filename) {
     // Open file for reading
     File file = SD.open(filename);
     if (!file) {
-        Serial.println(F("Failed to read file"));
+        SerialBoth::println(F("Failed to read file"));
         return;
     }
 
     // Extract each characters by one by one
     while (file.available()) {
-        Serial.print((char)file.read());
+        SerialBoth::print((char)file.read());
     }
-    Serial.println();
+    SerialBoth::println();
 
     file.close();
     SD.end();
@@ -502,7 +521,8 @@ extern navRoot nav;
 // URTouch utouch(TFT_SCLK, TOUCH_CS, TFT_MOSI, TFT_MISO, 2);
 TFT_eSPI_touchIn touch(tft, nav, eSpiOut);
 serialIn inSerial(Serial);
-MENU_INPUTS(in,&inSerial,&touch,&encStream/*&joystickBtns*/);
+serialIn inSerialUSB(SerialUSB);
+MENU_INPUTS(in,&inSerial,&inSerialUSB,&touch,&encStream/*&joystickBtns*/);
 
 void timerIsr() {clickEncoder.service();}
 
@@ -516,7 +536,7 @@ NAVROOT(nav,mainMenu,MAX_DEPTH,in,out);
 
 size_t get_calibrated_ref_value(unsigned int n_calibrations) {
     tft.println("Calibrating...");
-    Serial.println("Calibrating...");
+    SerialBoth::println("Calibrating...");
 
     size_t value = 0;
     delay(1000);
@@ -529,8 +549,8 @@ size_t get_calibrated_ref_value(unsigned int n_calibrations) {
     
     auto avg_value = value / n_calibrations;
     eSpiOut.print(avg_value);
-    Serial.println(avg_value);
-    Serial.println("Done!");
+    SerialBoth::println(avg_value);
+    SerialBoth::println("Done!");
     delay(2000);
     return avg_value;
 }
@@ -548,7 +568,7 @@ struct MyMeasurement {
         float voltage;
         float converted_voltage;
         uint32_t raw_current_voltage;
-        long uncalibrated_raw_current_voltage;
+        float uncalibrated_current_voltage;
         float current_voltage;
         float current;
         float power;
@@ -573,11 +593,11 @@ public:
     #endif
     #if DEBUG_MEASUREMENT == 1
     MyMeasurement(const RtcDateTime& now) : raw_voltage{ Measurement::raw_current_voltage(VOLTAGE_INPUT_PIN) },
-                      voltage{ Measurement::voltage(raw_voltage) },
+                      voltage{ Measurement::voltage(analogRead(VOLTAGE_INPUT_PIN)) },
                       converted_voltage{ Measurement::converted_voltage(voltage) },
                       raw_current_voltage{ Measurement::raw_current_voltage(CURRENT_INPUT_PIN) },
-                      uncalibrated_raw_current_voltage{ Measurement::uncalibrated_raw_current_voltage(raw_current_voltage, conf) },
-                      current_voltage{ Measurement::current_voltage(raw_current_voltage, conf) },
+                      uncalibrated_current_voltage{ Measurement::uncalibrated_current_voltage(raw_current_voltage, conf) },
+                      current_voltage{ Measurement::current_voltage(analogRead(CURRENT_INPUT_PIN), conf) },
                       current{ Measurement::current(current_voltage, conf) },
                       power{ Measurement::measure_power(converted_voltage, current) },
                       consumption{ Measurement::consumption(power, conf) },
@@ -589,18 +609,18 @@ public:
         #if INIT_SD == 1
             if(SD.begin(SD_CS) == false) {
                 #if SERIAL_DEBUG == 1
-                    Serial.println(F("ERROR: Failed to mount SD"));
+                    SerialBoth::println(F("ERROR: Failed to mount SD"));
                 #endif
                 return false;
             } else {
                 #if SERIAL_DEBUG == 1
-                    Serial.println("INFO: SD card mounted successfully.");
+                    SerialBoth::println("INFO: SD card mounted successfully.");
                 #endif
             }
         #endif
         
         String final_filename = String(now.Day()) + "-" + String(now.Month()) + ".csv";
-        Serial.println(final_filename);
+        SerialBoth::println(final_filename);
         String log = "";
         if (SD.exists(final_filename) == false) {
             log = "Time [HH:MM:SS],Voltage [V],State [None=0|Low|Fine|High],Current [A],State [None=0|Low|Fine|High],Power [W],Consumption [Wh]\n";
@@ -609,7 +629,7 @@ public:
         SdFile::dateTimeCallback(setDateTime);
         File file = SD.open(final_filename, FILE_WRITE);
         if (!file) {
-            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            SerialBoth::println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
             return false;
         }
 
@@ -623,13 +643,13 @@ public:
         
         file.println(log);  // Write the log to the file
         if (file.getWriteError() != 0) {
-            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            SerialBoth::println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
             file.close();
             return false;
         }
 
         file.close();
-        Serial.println("INFO: Measurement saved successfully");
+        SerialBoth::println("INFO: Measurement saved successfully");
 
         #if INIT_SD == 1
             SD.end();
@@ -644,12 +664,12 @@ public:
         #if INIT_SD == 1
         if(SD.begin(SD_CS) == false) {
             #if SERIAL_DEBUG == 1
-            Serial.println(F("ERROR: Failed to mount SD"));
+            SerialBoth::println(F("ERROR: Failed to mount SD"));
             #endif
             return false;
         } else {
             #if SERIAL_DEBUG == 1
-            Serial.println("INFO: SD card mounted successfully.");
+            SerialBoth::println("INFO: SD card mounted successfully.");
             #endif
         }
         #endif
@@ -663,7 +683,7 @@ public:
         SdFile::dateTimeCallback(setDateTime);
         File file = SD.open(final_filename, FILE_WRITE);
         if (!file) {
-            Serial.println(F("ERROR: Failed to log the measurement"));
+            SerialBoth::println(F("ERROR: Failed to log the measurement"));
             return false;
         }
 
@@ -680,13 +700,13 @@ public:
         
         file.println(log);  // Write the log to the file
         if (file.getWriteError() != 0) {
-            Serial.println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
+            SerialBoth::println("ERROR: Failed to log the measurement. Write error: " + String(file.getWriteError()));
             file.close();
             return false;
         }
 
         file.close();
-        Serial.println("INFO: Measurement saved successfully");
+        SerialBoth::println("INFO: Measurement saved successfully");
 
         #if INIT_SD == 1
         SD.end();
@@ -721,7 +741,7 @@ bool measure() {
                                                         measurement.voltage,
                                                         measurement.converted_voltage,
                                                         measurement.raw_current_voltage,
-                                                        measurement.uncalibrated_raw_current_voltage,
+                                                        measurement.uncalibrated_current_voltage,
                                                         measurement.current_voltage,
                                                         measurement.current,
                                                         measurement.power,
@@ -745,9 +765,9 @@ bool measure() {
 
 result eject_SD() {
     SD.end();
-    Serial.println();
-    Serial.println();
-    Serial.println("Card unmounted");
+    SerialBoth::println();
+    SerialBoth::println();
+    SerialBoth::println("Card unmounted");
     return proceed;
 }
 
@@ -768,8 +788,8 @@ result save_config() {
 }
 
 result print_config() {
-    Serial.println();
-    Serial.println();
+    SerialBoth::println();
+    SerialBoth::println();
     conf.print();
     return proceed;
 }
@@ -850,6 +870,7 @@ void setup() {
     #if SERIAL_DEBUG == 1
     // Initilize communication over serial line
     Serial.begin(9600);
+    SerialUSB.begin(9600);
     while(!Serial);
     #endif
 
@@ -869,12 +890,12 @@ void setup() {
     // Initialize EEPROM
     eeprom.begin();
     if (eeprom.isConnected() == false) {
-        Serial.println(F("ERROR: Can't find eeprom"));
-        Serial.println(F("WARNING: Loading default configuration"));
+        SerialBoth::println(F("ERROR: Can't find eeprom"));
+        SerialBoth::println(F("WARNING: Loading default configuration"));
     }
 
     // Load conf from SD card
-    Serial.println(F("Loading configuration..."));
+    SerialBoth::println(F("Loading configuration..."));
     if(load_config_from_SD(filename, conf) == false) { // If loading from SD fails...
         uint8_t eeprom_set = 0;
         eeprom.get(0, eeprom_set); // Read from EEPROM if config was ever written to it
@@ -900,14 +921,14 @@ void setup() {
             // we have a communications error
             // see https://www.arduino.cc/en/Reference/WireEndTransmission for 
             // what the number means
-            Serial.print("RTC communications error = ");
-            Serial.println(rtc.LastError());
+            SerialBoth::print("RTC communications error = ");
+            SerialBoth::println(rtc.LastError());
         } else {
             // Common Causes:
             //    1) first time you ran and the device wasn't running yet
             //    2) the battery on the device is low or even missing
 
-            Serial.println("RTC lost confidence in the DateTime!");
+            SerialBoth::println("RTC lost confidence in the DateTime!");
             // following line sets the RTC to the date & time this sketch was compiled
             // it will also reset the valid flag internally unless the Rtc device is
             // having an issue
@@ -917,35 +938,34 @@ void setup() {
     }
 
     if (!rtc.GetIsRunning()) {
-        Serial.println("RTC was not actively running, starting now");
+        SerialBoth::println("RTC was not actively running, starting now");
         rtc.SetIsRunning(true);
     }
 
     RtcDateTime now = rtc.GetDateTime();
     if (now < compiled) {
-        Serial.println("RTC is older than compile time!  (Updating DateTime)");
+        SerialBoth::println("RTC is older than compile time!  (Updating DateTime)");
         rtc.SetDateTime(compiled);
     }
     else if (now > compiled) {
-        Serial.println("RTC is newer than compile time. (this is expected)");
+        SerialBoth::println("RTC is newer than compile time. (this is expected)");
     }
     else if (now == compiled) {
-        Serial.println("RTC is the same as compile time! (not expected but all is fine)");
+        SerialBoth::println("RTC is the same as compile time! (not expected but all is fine)");
     }
 
     // never assume the Rtc was last configured by you, so
     // just clear them to your needed state
     rtc.SetSquareWavePin(DS1307SquareWaveOut_Low); 
 
-    Serial.println("INFO: Use keys '+', '-', '*', '/'");
-    Serial.println("to control the menu navigation");
-    Serial.flush();
+    SerialBoth::println("INFO: Use keys '+', '-', '*', '/'");
+    SerialBoth::println("to control the menu navigation");
 
-    conf.current_calibration = get_calibrated_ref_value(conf.n_calibrations) + conf.current_correction; // Calibrate reference voltage
-    Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
-    Quantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V" };
-    conf.voltage_calibration = conf.intended_voltage - converted_voltage.get_value();
-    eSpiOut.print(conf.voltage_calibration);
+    // conf.current_calibration = get_calibrated_ref_value(conf.n_calibrations) + conf.current_correction; // Calibrate reference voltage
+    // Quantity voltage{ Measurement::measure_voltage(VOLTAGE_INPUT_PIN, conf), "V" };
+    // Quantity converted_voltage{ Measurement::measure_converted_voltage(voltage.get_value(), conf), "V" };
+    // conf.voltage_calibration = conf.intended_voltage - converted_voltage.get_value();
+    // eSpiOut.print(conf.voltage_calibration);
     delay(2000);
     eSpiOut.clear();
 
