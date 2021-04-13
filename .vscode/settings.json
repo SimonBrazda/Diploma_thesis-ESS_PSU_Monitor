@@ -3,6 +3,7 @@
         "menudefs.h": "c",
         "arduino.h": "c",
         "known_16bit_timers.h": "c",
-        "print.h": "c"
+        "print.h": "c",
+        "rtcdatetime.h": "c"
     }
 }

@@ -1,19 +1,21 @@
-    #include <config.h>
+    #include "Config.h"
 
     void Config::print() {
-        Serial.println("conf_in_eeprom " + String(conf_in_eeprom));
-        Serial.println("n_calibrations " + String(n_calibrations));
-        Serial.println("max_voltage " + String(max_voltage));
-        Serial.println("min_voltage " + String(min_voltage));
-        Serial.println("max_current " + String(max_current));
-        Serial.println("min_current " + String(min_current));
-        Serial.println("measurement_delay " + String(measurement_delay));
+        Serial.println("maxVoltage " + String(maxVoltage));
+        Serial.println("minVoltage " + String(minVoltage));
+        Serial.println("maxCurrent " + String(maxCurrent));
+        Serial.println("minCurrent " + String(minCurrent));
+        Serial.println("measurementDelay " + String(measurementDelay));
         Serial.println("sensitivity " + String(sensitivity));
-        Serial.println("R1 " + String(R1));
-        Serial.println("R2 " + String(R2));
+        Serial.println("voltageR1 " + String(voltageR1));
+        Serial.println("voltageR2 " + String(voltageR2));
+        Serial.println("currentR1 " + String(currentR1));
+        Serial.println("currentR2 " + String(currentR2));
         Serial.println("resolution " + String(resolution));
-        Serial.println("reference_voltage " + String(reference_voltage));
-        Serial.println("current_calibration " + String(current_calibration));
-        Serial.println("calibration_voltage " + String(voltage_calibration));
-        Serial.println("\tDone...");
+        Serial.println("referenceVoltage " + String(referenceVoltage));
+        Serial.println("currentCalibration " + String(currentCalibration));
+        Serial.println("currentVoltageCalibration " + String(currentVoltageCalibration));
+        Serial.println("calibrationVoltage " + String(voltageCalibration));
+        Serial.println("displayRotation " + String(displayRotation));
+        Serial.println("timeToSleep " + String(timeToSleep));
     }

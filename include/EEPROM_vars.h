@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include <I2C_eeprom.h>
 
-// DESCRIPTION: Extends functionality of Rob Tillaart's library by allowing client to easily read/write any data types from/to an EEPROM.
+#include "SerialBoth.h"
 
 class EEPROM : public I2C_eeprom
 {
@@ -10,32 +10,33 @@ public:
     EEPROM(const uint8_t deviceAddress, const uint32_t deviceSize, TwoWire *wire = &Wire) : I2C_eeprom(deviceAddress, deviceSize, wire) {};
     ~EEPROM() {};
 
-    //Read any data type from EEPROM.
+    // Read any data type from EEPROM.
     template <typename T>
     T &get(uint16_t idx, T &t) {
         uint8_t *ptr = (uint8_t *)&t;
-        readBlock(idx, ptr, sizeof(T)); //Address, data, sizeOfData
+        readBlock(idx, ptr, sizeof(T)); // Address, data, sizeOfData
         return t;
     }
 
-    //Write any data type from EEPROM.
+    // Write any data type to EEPROM.
     template <typename T>
     const T &put(uint16_t idx, const T &t) {
         const uint8_t *ptr = (const uint8_t *)&t;
-        updateBlock(idx, ptr, sizeof(T)); //Address, data, sizeOfData
+        updateBlock(idx, ptr, sizeof(T)); // Address, data, sizeOfData
         return t;
     }
 
-    void dumpEEPROM(uint16_t memoryAddress, uint16_t length) {
+    // Dump EEPROM memory to Serials
+    void dumpEeprom(uint16_t memoryAddress, uint16_t length) {
         const int BLOCK_TO_LENGTH = 10;
         
-        Serial.print("\t  ");
+        SerialBoth::print("\t  ");
         for (int x = 0; x < 10; x++)
         {
-            if (x != 0) Serial.print("    ");
-            Serial.print(x);
+            if (x != 0) SerialBoth::print("    ");
+            SerialBoth::print(x);
         }
-        Serial.println();
+        SerialBoth::println();
 
         // block to defined length
         memoryAddress = memoryAddress / BLOCK_TO_LENGTH * BLOCK_TO_LENGTH;
@@ -47,16 +48,16 @@ public:
             char buf[6];
             if (memoryAddress % BLOCK_TO_LENGTH == 0)
             {
-            if (i != 0) Serial.println();
+            if (i != 0) SerialBoth::println();
             sprintf(buf, "%05d", memoryAddress);
-            Serial.print(buf);
-            Serial.print(":\t");
+            SerialBoth::print(buf);
+            SerialBoth::print(":\t");
             }
             sprintf(buf, "%03d", b);
-            Serial.print(buf);
+            SerialBoth::print(buf);
             b = readByte(++memoryAddress);
-            Serial.print("  ");
+            SerialBoth::print("  ");
         }
-        Serial.println();
+        SerialBoth::println();
     }
 };

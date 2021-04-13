@@ -1,1 +1,0 @@
-{"conf_in_eeprom":1,"n_calibrations":100,"max_voltage":15,"min_voltage":11.5,"max_current":10,"min_current":0.1,"measurement_delay":1000,"sensitivity":0.185,"R1":180000,"R2":47000,"resolution":4095,"reference_voltage":3.3,"current_calibration":540,"voltage_calibration":0.00,"intended_voltage":12.0,"current_correction":245}
