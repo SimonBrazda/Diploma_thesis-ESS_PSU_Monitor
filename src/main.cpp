@@ -10,7 +10,9 @@
 #include <SPI.h>
 #include <SD.h>
 
-#include "Config.h"
+// Ignore comments in json files
+// Must be set before inclusion of ArduinoJson.h
+#define ARDUINOJSON_ENABLE_COMMENTS 1
 
 #include <Wire.h>
 #include <RtcDS1307.h>
@@ -27,6 +29,7 @@
 #include <menuIO/serialIn.h>
 #include <menuIO/keyIn.h>
 
+#include "Config.h"
 #include "TFT_eSPI_touchIn.h"
 #include "EEPROM_vars.h"
 #include "Quantity.h"

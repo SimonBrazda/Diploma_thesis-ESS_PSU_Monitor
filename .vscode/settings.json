@@ -4,6 +4,7 @@
         "arduino.h": "c",
         "known_16bit_timers.h": "c",
         "print.h": "c",
-        "rtcdatetime.h": "c"
+        "rtcdatetime.h": "c",
+        "tft_espiout.h": "c"
     }
 }

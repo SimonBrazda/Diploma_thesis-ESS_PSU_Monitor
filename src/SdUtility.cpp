@@ -7,9 +7,8 @@ bool SdUtility::InitSd(size_t count) {
             #if DEBUG == 1
             SerialBoth::println();
             SerialBoth::println("Failed to mount SD");
-            SerialBoth::println("Try " + String(i) + "/" + String(count));
+            SerialBoth::println("Try " + String(i + 1) + "/" + String(count));
             #endif
-            delay(1000);
         } else {
             #if DEBUG == 1
             SerialBoth::println();

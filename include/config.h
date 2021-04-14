@@ -34,10 +34,6 @@ enum Eval{ None = 0, Low, Fine, High };
 // Set it to 0 if this behaviour is not desired
 #define DEBUG 1
 
-// Ignore comments in json files
-// Must be set before inclusion of ArduinoJson.h
-#define ARDUINOJSON_ENABLE_COMMENTS 1
-
 // Depth of the menu system
 #define MAX_DEPTH 3
 
@@ -49,22 +45,14 @@ enum Eval{ None = 0, Low, Fine, High };
 #define SOFT_DEBOUNCE_MS 100
 
 // Font scaling ///////////////////////////////
-#if DEBUG == 0
-    #define TEXT_SCALE 4
-#else
-    #define TEXT_SCALE 3
-#endif
+#define TEXT_SCALE 3
 
 #define FONT_WIDTH 6
 #define FONT_HEIGHT 9
 ///////////////////////////////////////////////
 
 // Last display line
-#if DEBUG == 0
-    #define LAST_DISPLAY_LINE 9
-#else
-    #define LAST_DISPLAY_LINE 13
-#endif
+#define LAST_DISPLAY_LINE 13
 
 // Encoder /////////////////////////////////////
 #define ENCODER_A 11
@@ -73,6 +61,10 @@ enum Eval{ None = 0, Low, Fine, High };
 #define ENCODER_STEPS 4
 
 // Colors //////////////////////////////////////
+#ifndef RGB565
+    #define RGB565(r,g,b) ((((r>>3)<<11) | ((g>>2)<<5) | (b>>3)))
+#endif
+
 #define Black RGB565(0,0,0)
 #define Red	RGB565(255,0,0)
 #define Green RGB565(0,255,0)

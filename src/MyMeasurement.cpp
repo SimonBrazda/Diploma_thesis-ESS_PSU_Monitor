@@ -13,7 +13,7 @@ MyMeasurement::MyMeasurement(
         now{ now } {}
 
 bool MyMeasurement::LogToSd() {
-    SdUtility::InitSd(1);
+    // SdUtility::InitSd(1);
     
     String filename = String(now.Day()) + "-" + String(now.Month()) + ".csv";
     String log = "";
@@ -49,7 +49,7 @@ bool MyMeasurement::LogToSd() {
     }
 
     file.close();
-    SD.end();
+    // SD.end();
 
     return true;
 }

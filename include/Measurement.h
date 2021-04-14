@@ -9,16 +9,14 @@
 namespace Measurement {
     #if DEBUG == 0
     static float MeasureVoltage(const uint32_t pin, const Config& conf) {
-        auto rawVoltage = analogRead(pin);
-        float voltage = conf.referenceVoltage / conf.resolution * rawVoltage;
+        float voltage = conf.referenceVoltage / conf.resolution * analogRead(pin);
         float converted_voltage = voltage * (conf.voltageR1 + conf.voltageR2) / conf.voltageR2;
         float calibrated_converted_voltage = converted_voltage + conf.voltageCalibration;
         return calibrated_converted_voltage >= 0 ? calibrated_converted_voltage : 0;
     }
 
     static float MeasureCurrent(const uint32_t pin, const Config& conf) {
-        auto rawCurrentVoltage = analogRead(pin);
-        float currentVoltage = conf.referenceVoltage / conf.resolution * rawCurrentVoltage;
+        float currentVoltage = conf.referenceVoltage / conf.resolution * analogRead(pin);
         float convertedCurrentVoltage = currentVoltage * (conf.currentR1 + conf.currentR2) / conf.currentR2;
         float calibratedConvertedCurrentVoltage = convertedCurrentVoltage + conf.currentVoltageCalibration;
         float current = calibratedConvertedCurrentVoltage / conf.sensitivity;
