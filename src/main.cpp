@@ -19,7 +19,6 @@
 #include <TFT_eSPI.h>
 #include <ArduinoJson.h>
 #include <menu.h>
-#include <ClickEncoder.h>
 #include <SAMDUETimerInterrupt.h>
 #include <menuIO/clickEncoderIn.h>
 #include <menuIO/serialIO.h>

@@ -5,6 +5,8 @@
         "known_16bit_timers.h": "c",
         "print.h": "c",
         "rtcdatetime.h": "c",
-        "tft_espiout.h": "c"
+        "tft_espiout.h": "c",
+        "clickencoder.h": "c",
+        "i2c_eeprom.h": "c"
     }
 }
