@@ -62,6 +62,7 @@ To be able to build the project you will need to make sure that **`ClickEncoder.
 * [ClickEncoder v0.0.0+](https://github.com/0xPIT/encoder/blob/master/ClickEncoder.h) by ToeKnee
 * [I2C_EEPROM v1.4.3+](https://github.com/RobTillaart/I2C_EEPROM) by Rob Tillaart
 * [Rtc v2.3.5+](https://github.com/Makuna/Rtc) by Michael Miller
+* [SPI](https://github.com/arduino/ArduinoCore-avr/tree/master/libraries/SPI)
 
 ### Hardware
 * [Arduino DUE](https://www.arduino.cc/en/Guide/ArduinoDue)

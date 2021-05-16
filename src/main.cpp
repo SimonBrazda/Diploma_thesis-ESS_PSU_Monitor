@@ -1,10 +1,42 @@
-// Title: A Module for Power Supply Analysis of Electronic Security Systems
-// Author: Šimon Brázda
-// E-mail: simonbrazda@seznam.cz
-// Date: 07/2021
-// Description:
-// Hardware:
-// Repository:
+// A Module for Power Supply Analysis of Electronic Security Systems
+// Copyright (C) 2021 by Šimon Brázda <simonbrazda@seznam.cz>
+
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+
+// You should have received a copy of the GNU Lesser General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+// Description: This program is meant for a module that monitors
+//              Power Supplies of Electronic Security Systems - their voltage,
+//              current, power and consumption. It logs measurements to SD card
+//              and displays the data on LCD. The Module allows user to set maximum
+//              and minimum allowed voltage and current. If measured values are higher or
+//              lower than set tresholds the displayed values change color accordingly to
+//              notify the user. Thhe information is logged aswell.
+// For detailed description of the program and the module itself read README.md and
+// diploma_thesis itself included in this repository.
+
+// Hardware: Arduino DUE,
+//           3.5inch TFT LCD <http://www.lcdwiki.com/3.5inch_SPI_Module_ILI9488_SKU:MSP3520>,
+//           ACS715LLCTR-20A-T,
+//           RTC module DS1307,
+//           Incremental encoder with push button EC11,
+//           DC/DC converter TSR 1-2450,
+//           THT metalic rezistors 47k, 62k, 120k and 180k,
+//           SMD resistors 1206 10k,
+//           Ceramic SMD capacitor 0805 100 nF/50 V,
+//           EEPROM THT 24LC04B 256 KB.
+// For detailed list of used components view README.md and schematics provided in the repository.
+
+// Repository: <https://github.com/SimonBrazda/diploma_thesis>
 
 #include <Arduino.h>
 #include <SPI.h>
