@@ -73,4 +73,4 @@ Big thanks to all contributors to these awesome [libraries](#libraries)! Without
 If you find any issues with the project or have any questions feel free to contact me at [simonbrazda@seznam.cz](mailto:simonbrazda@seznam.cz).
 
 ## License
-The library is licensed under [GNU GPLv3](https://www.gnu.org/licenses/gpl-3.0.en.html)
+The library is licensed under [GNU LGPLv3](https://www.gnu.org/licenses/lgpl-3.0.html)
