@@ -20,7 +20,7 @@ struct Config {
     float referenceVoltage = 3.30F; // Reference voltage used be your A/D converter [V]
     float currentCalibration = 0.1652F; // Calibration value of measured current [A]
     float currentVoltageCalibration = -0.5F; // Calibration value of the output voltage of your current sensor [V]
-    float voltageCalibration = 0.00F; // Calibration value of voltage measurement [V]
+    float voltageCalibration = -0.3586F; // Calibration value of voltage measurement [V]
     unsigned int displayRotation = 2; // Screen rotation oriantation of your display [0-3]
     unsigned int timeToSleep = 600;  // Minimum time of inactivity required to go into sleep state [s]
 
@@ -32,7 +32,7 @@ enum Eval{ None = 0, Low, Fine, High };
 
 // DEBUG set to 1 enables printing of useful debugging info to Serial and SerialUSB
 // Set it to 0 if this behaviour is not desired
-#define DEBUG 1
+#define DEBUG 0
 
 // Depth of the menu system
 #define MAX_DEPTH 3

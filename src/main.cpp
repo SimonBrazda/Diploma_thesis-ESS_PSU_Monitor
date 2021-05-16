@@ -1,5 +1,5 @@
 // Title: A Module for Power Supply Analysis of Electronic Security Systems
-// Author: Simon Brazda
+// Author: Šimon Brázda
 // E-mail: simonbrazda@seznam.cz
 // Date: 07/2021
 // Description:
@@ -71,10 +71,13 @@ panelsList pList(panels, nodes, 1); // A list of panels and nodes
 idx_t eSpiTops[MAX_DEPTH] = { 0 };
 TFT_eSPIOut eSpiOut(tft, colors, eSpiTops, pList, charW, charH + 1); // TFT LCD display output device
 idx_t serialTops[MAX_DEPTH] = { 0 };
+#if DEBUG == 1
 serialOut outSerial(Serial, serialTops);
 serialOut outSerialUsb(SerialUSB, serialTops);
-
 MENU_OUTLIST(out, &eSpiOut, &outSerial, &outSerialUsb);
+#else
+MENU_OUTLIST(out, &eSpiOut);
+#endif
 /////////////////////////////////////////////////////////////////////////////////
 
 // Hardware interrupt
@@ -326,9 +329,13 @@ ClickEncoder clickEncoder = ClickEncoder(ENCODER_A, ENCODER_B, ENCODER_BUTTON, E
 ClickEncoderStream encStream(clickEncoder, 1);
 
 TFT_eSPI_touchIn touch(tft, nav, eSpiOut); // Touch screen
+#if DEBUG == 1
 serialIn inSerial(Serial);
 serialIn inSerialUSB(SerialUSB); // Native USB serial
 MENU_INPUTS(in, &inSerial, &inSerialUSB, &touch, &encStream); // Concatenates input streams into a single one stream "in"
+#else
+MENU_INPUTS(in, &touch, &encStream); // Concatenates input streams into a single one stream "in"
+#endif
 ////////////////////////////////////////////////////////////////////////////////
 
 void timerIsr() {clickEncoder.service();}

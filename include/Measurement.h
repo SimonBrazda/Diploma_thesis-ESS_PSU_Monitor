@@ -9,13 +9,19 @@
 namespace Measurement {
     #if DEBUG == 0
     static float MeasureVoltage(const uint32_t pin, const Config& conf) {
-        float voltage = conf.referenceVoltage / conf.resolution * analogRead(pin);
+        // For a reason unknown to me, we need to read from analog to get rid of its bad state
+        // This ensures that the next value we read will be correct
+        analogRead(pin);
+        float voltage = (conf.referenceVoltage / conf.resolution) * analogRead(pin);
         float converted_voltage = voltage * (conf.voltageR1 + conf.voltageR2) / conf.voltageR2;
         float calibrated_converted_voltage = converted_voltage + conf.voltageCalibration;
         return calibrated_converted_voltage >= 0 ? calibrated_converted_voltage : 0;
     }
 
     static float MeasureCurrent(const uint32_t pin, const Config& conf) {
+        // For a reason unknown to me, we need to read from analog to get rid of its bad state
+        // This ensures that the next value we read will be correct
+        analogRead(pin); 
         float currentVoltage = conf.referenceVoltage / conf.resolution * analogRead(pin);
         float convertedCurrentVoltage = currentVoltage * (conf.currentR1 + conf.currentR2) / conf.currentR2;
         float calibratedConvertedCurrentVoltage = convertedCurrentVoltage + conf.currentVoltageCalibration;
@@ -28,6 +34,9 @@ namespace Measurement {
     #if DEBUG == 1
     template<typename O>
     static float DebugMeasureVoltage(O& out, const uint32_t pin, const Config& conf) {
+        // For a reason unknown to me, we need to read from analog to get rid of its bad state
+        // This ensures that the next value we read will be correct
+        analogRead(pin);
         auto rawVoltage = analogRead(pin);
         float voltage = conf.referenceVoltage / conf.resolution * rawVoltage;
         float converted_voltage = voltage * (conf.voltageR1 + conf.voltageR2) / conf.voltageR2;
@@ -54,6 +63,9 @@ namespace Measurement {
 
     template<typename O>
     static float DebugMeasureCurrent(O& out, const uint32_t pin, const Config& conf) {
+        // For a reason unknown to me, we need to read from analog to get rid of its bad state
+        // This ensures that the next value we read will be correct
+        analogRead(pin);
         auto rawCurrentVoltage = analogRead(pin);
         float currentVoltage = conf.referenceVoltage / conf.resolution * rawCurrentVoltage;
         float convertedCurrentVoltage = currentVoltage * (conf.currentR1 + conf.currentR2) / conf.currentR2;
