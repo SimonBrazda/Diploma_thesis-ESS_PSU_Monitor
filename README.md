@@ -9,7 +9,7 @@
 ## Installation
 To be able to use this project right away with all its blows and whistles you will need working [Visual Studio Code IDE](https://code.visualstudio.com/) with [Platformio](https://platformio.org/) extension and [Arduino IDE](https://www.arduino.cc/en/software). Easy to follow list of required software and libraries is at [Requirements](#requirements). It is possible to use this project in vanila Arduino IDE or other IDEs, however you will need to do some extra work to get it working.
 
-1. Clone thi repo with `git clone https://github.com/SimonBrazda/diploma_thesis` or download the zip file.
+1. Clone thi repo with `git clone https://github.com/SimonBrazda/Diploma_thesis-ESS_PSU_Monitor` or download the zip file.
 
 ### VS Code & PlatformIO
 2. Install [VS Code](https://code.visualstudio.com/Download).
