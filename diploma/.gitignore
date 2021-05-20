@@ -1,6 +1,7 @@
 **/*.jpg
 **/*.png
 **/*.docx
+**/*.doc
 **/*.xlsx
 **/*.pptx
 **/*.pdf
